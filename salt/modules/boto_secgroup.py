@@ -265,8 +265,8 @@ def create(name, description, vpc_id=None, region=None, key=None, keyid=None,
         return False
 
 
-def delete(name=None, group_id=None, region=None, key=None, keyid=None,
-           profile=None, vpc_id=None):
+def delete(name=None, group_id=None, vpc_id=None, region=None, key=None, keyid=None,
+           profile=None):
     '''
     Delete an autoscale group.
 
@@ -302,11 +302,11 @@ def delete(name=None, group_id=None, region=None, key=None, keyid=None,
         return False
 
 
-def authorize(name=None, source_group_name=None,
+def authorize(name=None, vpc_id=None, source_group_name=None,
               source_group_owner_id=None, ip_protocol=None,
               from_port=None, to_port=None, cidr_ip=None, group_id=None,
               source_group_group_id=None, region=None, key=None,
-              keyid=None, profile=None, vpc_id=None):
+              keyid=None, profile=None):
     '''
     Add a new rule to an existing security group.
 
@@ -344,8 +344,8 @@ def authorize(name=None, source_group_name=None,
 def revoke(name=None, source_group_name=None,
            source_group_owner_id=None, ip_protocol=None,
            from_port=None, to_port=None, cidr_ip=None, group_id=None,
-           source_group_group_id=None, region=None, key=None,
-           keyid=None, profile=None, vpc_id=None):
+           source_group_group_id=None, vpc_id=None, region=None, key=None,
+           keyid=None, profile=None):
     '''
     Remove a rule from an existing security group.
 
