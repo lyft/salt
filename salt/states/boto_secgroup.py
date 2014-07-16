@@ -66,7 +66,6 @@ as a passed in dict, or as a string to pull from pillars or minion config:
                 keyid: GKTADJGHEIQSXMKKRBJ08H
                 key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 '''
-
 import salt.utils.dictupdate as dictupdate
 from salt.exceptions import SaltInvocationError
 
@@ -176,6 +175,7 @@ def _get_rule_changes(rules, _rules):
     # for each rule in state file
     # 1. validate rule
     # 2. determine if rule exists in existing security group rules
+
     for rule in rules:
         try:
             ip_protocol = rule.get('ip_protocol')
@@ -205,6 +205,8 @@ def _get_rule_changes(rules, _rules):
                                       ' source_group_name must be provided for'
                                       ' security group rules.')
         rule_found = False
+        # for each rule in existing security group ruleset determine if
+        # new rule exists
         for _rule in _rules:
             if (ip_protocol == _rule['ip_protocol'] and
                     from_port == _rule['from_port'] and
@@ -219,8 +221,8 @@ def _get_rule_changes(rules, _rules):
         if not rule_found:
             to_create.append(rule)
 
-    # for each rule in existing security group configuration, determine if any
-    # rules needed to be deleted
+    # for each rule in existing security group configuration
+    # 1. determine if rules needed to be deleted
     for _rule in _rules:
         _ip_protocol = _rule.get('ip_protocol')
         _to_port = _rule.get('to_port')
