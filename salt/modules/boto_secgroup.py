@@ -61,9 +61,10 @@ def __virtual__():
     return True
 
 
-def _get_group_object(conn, group_id):
-    # the get_all_security_groups(group_ids=[group_id])
-    # is a less expensive call than get_all_security_groups(group_ids=[group_id])
+def _get_group(conn, group_id):
+    '''
+    given a security group id returns a group object
+    '''
     groups = conn.get_all_security_groups(group_ids=[group_id])
     _add_group_context(groups[0].id, groups[0])
     if len(groups) == 1:
@@ -73,7 +74,11 @@ def _get_group_object(conn, group_id):
 
 
 def _add_group_context(group_id, group_object):
-    logging.debug('adding group_id {0} name {1} and vpc_id {2} to context'.format(group_object.id, group_object.name, group_object.vpc_id))
+    '''
+    given a group id and group object, adds the group object to the context
+    for reuse. Use to decrease API calls.
+    '''
+    logging.debug('adding group_id {0} to context'.format(group_object.id))
     if __context__.get('boto_secgroup.groups') is None:
         # if _get_group_id does not exist, create a dict to hold group ids
         __context__['boto_secgroup.groups'] = {}
@@ -83,6 +88,10 @@ def _add_group_context(group_id, group_object):
 
 
 def _get_group_context(group_id=None, name=None, vpc_id=None):
+    '''
+    given a name, name and vpc_id or group_id return a group object. Use to
+    decrease API calls.
+    '''
     if __context__.get('boto_secgroup.groups') is None:
         # if _get_group_id does not exist, create a dict to hold group ids
         __context__['boto_secgroup.groups'] = {}
@@ -114,7 +123,7 @@ def _get_group_id(conn, name, vpc_id=None):
     Given a name or name and vpc_id return a group id or None.
     '''
     logging.debug('getting group_id for {0}'.format(name))
-    # search the context (_get_group_object) for an id to return
+    # search the context (_get_group) for an id to return
     group_object = _get_group_context(name=name, vpc_id=vpc_id)
     if group_object:
         return group_object.id
@@ -169,7 +178,7 @@ def exists(name=None, group_id=None, vpc_id=None, region=None, key=None, keyid=N
         if name:
             group_id = _get_group_id(conn, name, vpc_id)
         if group_id:
-            return _get_group_object(conn, group_id)
+            return _get_group(conn, group_id)
         else:
             return False
     except boto.exception.BotoServerError as e:
@@ -237,7 +246,7 @@ def get_config(name=None, group_id=None, vpc_id=None, region=None, key=None,
                 sg = _get_group_context(group_id=group_id)
             if sg is None:
                 logging.debug('group_object does not exist in context or allow_context=False. Getting object.')
-                sg = _get_group_object(conn, group_id)
+                sg = _get_group(conn, group_id)
         if sg is None:
             return {}
     except boto.exception.BotoServerError as e:
@@ -306,11 +315,7 @@ def create(name, description, vpc_id=None, region=None, key=None, keyid=None,
         return False
     if created:
         log.info('Created security group {0}.'.format(name))
-        if __context__.get('_group_id') is None:
-            # if _get_group_id does not exist, create a dict to hold group ids
-            __context__['_group_id'] = {}
-        context_entry = {created.id: {'name': name, 'vpc_id': vpc_id}}
-        __context__['_group_id'].update(context_entry)
+        _add_group_context(created.id, created)
         return True
     else:
         msg = 'Failed to create security group {0}.'.format(name)

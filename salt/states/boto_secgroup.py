@@ -262,8 +262,7 @@ def _rules_present(
         profile):
     ret = {'result': None, 'comment': '', 'changes': {}}
     sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region, key,
-                                              keyid, profile,
-                                              allow_context=False)
+                                              keyid, profile)
     if not sg:
         msg = '{0} security group configuration could not be retreived.'
         ret['comment'] = msg.format(name)
