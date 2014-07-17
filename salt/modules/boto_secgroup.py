@@ -89,33 +89,32 @@ def _get_group(conn, group_id):
 
 def _get_group_from_context(group_id=None, name=None, vpc_id=None):
     '''
-    given a name, name and vpc_id or group_id return a group object. Use to
-    decrease API calls.
+    given a name, name and vpc_id or group_id return a group.
+    Use to decrease API calls.
     '''
     if __context__.get('boto_secgroup.groups') is None:
         # if _get_group_id does not exist, create a dict to hold group ids
         __context__['boto_secgroup.groups'] = {}
-    group_object = None
+    group = None
     if group_id:
-        logging.debug('attempting lookup of group id {0} in context'.format(group_id))
+        logging.debug('lookup of group id {0} in context'.format(group_id))
         if __context__['boto_secgroup.groups'].get(group_id):
-            logging.debug('found group id {0} in context'.format(group_id))
-            group_object = __context__['boto_secgroup.groups'][group_id]
-        return group_object
-    elif name:
-        logging.debug('attempting lookup of group name {0} in context'.format(name))
-        if __context__.get('boto_secgroup.groups') is None:
-            # if _get_group_id does not exist, create a dict to hold group ids
-            __context__['boto_secgroup.groups'] = {}
-        group_object = None
+            group = __context__['boto_secgroup.groups'][group_id]
+            logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
+        else:
+            logging.debug('group_id {1} not found in context.'.format(group_id))
+    if name:
+        logging.debug('lookup of group name {0} in context'.format(name))
         # search for group in context
-        for _group_id in __context__['boto_secgroup.groups']:
-            if (__context__['boto_secgroup.groups'][_group_id].name == name
-                and __context__['boto_secgroup.groups'][_group_id].vpc_id == vpc_id):
-                group_object = __context__['boto_secgroup.groups'][_group_id]
-                logging.debug('found group name {0} with group_id {1} in context.'.format(group_object.name, group_object.id))
-        # return None if group not found or group_id if found
-        return group_object
+        for _group in __context__['boto_secgroup.groups']:
+            if (__context__['boto_secgroup.groups'][_group].name == name
+                and __context__['boto_secgroup.groups'][_group].vpc_id == vpc_id):
+                group = __context__['boto_secgroup.groups'][_group]
+                logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
+            else:
+                logging.debug('group name {0} not found in context.'.format(name))
+    # return None if group not found or group if found
+    return group
 
 
 def _get_group_id(conn, name, vpc_id=None):
@@ -124,9 +123,9 @@ def _get_group_id(conn, name, vpc_id=None):
     '''
     logging.debug('getting group_id for {0}'.format(name))
     # search the context (_get_group) for an id to return
-    group_object = _get_group_from_context(name=name, vpc_id=vpc_id)
-    if group_object:
-        return group_object.id
+    group = _get_group_from_context(name=name, vpc_id=vpc_id)
+    if group:
+        return group.id
     if vpc_id is None:
         group_filter = {'group-name': name}
         filtered_groups = conn.get_all_security_groups(filters=group_filter)
@@ -174,15 +173,16 @@ def exists(name=None, group_id=None, vpc_id=None, region=None, key=None, keyid=N
     conn = _get_conn(region, key, keyid, profile)
     if not conn:
         return False
-    try:
-        if name:
-            group_id = _get_group_id(conn, name, vpc_id)
-        if group_id:
-            return _get_group(conn, group_id)
-        else:
-            return False
-    except boto.exception.BotoServerError as e:
-        log.debug(e)
+    group = False
+    # locate a group - first convert to group_id then call API
+    # if _get_group is extended to support name and vpc_id this becomes simple
+    if name:
+        group_id = _get_group_id(conn, name, vpc_id)
+    if group_id:
+        group = _get_group(conn, group_id)
+    if group:
+        return True
+    else:
         return False
 
 
