@@ -232,27 +232,21 @@ def get_config(name=None, group_id=None, vpc_id=None, region=None, key=None,
         return None
     if not (name or group_id):
         return None
-    try:
-        sg = None
-        if name:
-            group_id = _get_group_id(conn, name, vpc_id)
-        if group_id:
-            sg = None
-            # there are instances where the group_object in the context should
-            # not be used - for instance, if comparing group_id.rules
-            # before and after a rule change
-            if allow_context is True:
-                sg = _get_group_from_context(group_id=group_id)
-            if sg is None:
-                logging.debug('group_object does not exist in context or allow_context=False. Getting object.')
-                sg = _get_group(conn, group_id)
+    sg = None
+    if name:
+        group_id = _get_group_id(conn, name, vpc_id)
+    if group_id:
+        # there are instances where the group_object in the context should
+        # not be used - for instance, if comparing group_id.rules
+        # before and after a rule change
+        if allow_context is True:
+            sg = _get_group_from_context(group_id=group_id)
         if sg is None:
-            return {}
-    except boto.exception.BotoServerError as e:
-        msg = 'Failed to get config for security group {0}.'.format(name)
-        log.error(msg)
-        log.debug(e)
+            logging.debug('group_object does not exist in context or allow_context=False. Getting object.')
+            sg = _get_group(conn, group_id)
+    if sg is None:
         return {}
+
     ret = odict.OrderedDict()
     ret['name'] = sg.name
     ret['group_id'] = sg.id
