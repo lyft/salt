@@ -92,9 +92,8 @@ def _get_group_from_context(group_id=None, name=None, vpc_id=None):
     given a name, name and vpc_id or group_id return a group.
     Use to decrease API calls.
     '''
-    if __context__.get('boto_secgroup.groups') is None:
-        # if _get_group_id does not exist, create a dict to hold group ids
-        __context__['boto_secgroup.groups'] = {}
+    # set boto_secgroup.groups = to {} if boto_secgroup.groups does not exist
+    __context__.setdefault('boto_secgroup.groups',{})
     group = None
     if group_id:
         logging.debug('lookup of group id {0} in context'.format(group_id))
@@ -108,7 +107,7 @@ def _get_group_from_context(group_id=None, name=None, vpc_id=None):
         # search for group in context
         for _group in __context__['boto_secgroup.groups']:
             if (__context__['boto_secgroup.groups'][_group].name == name
-                and __context__['boto_secgroup.groups'][_group].vpc_id == vpc_id):
+                    and __context__['boto_secgroup.groups'][_group].vpc_id == vpc_id):
                 group = __context__['boto_secgroup.groups'][_group]
                 logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
             else:
