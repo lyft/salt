@@ -66,6 +66,12 @@ as a passed in dict, or as a string to pull from pillars or minion config:
                 keyid: GKTADJGHEIQSXMKKRBJ08H
                 key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 '''
+
+# Import Python libs
+import logging
+
+log = logging.getLogger(__name__)
+
 import salt.utils.dictupdate as dictupdate
 from salt.exceptions import SaltInvocationError
 
@@ -141,6 +147,12 @@ def _security_group_present(
         key,
         keyid,
         profile):
+    '''
+    given a group name or a group name and vpc id:
+    1. determine if the group exists
+    2. if the group does not exist, creates the group
+    3. return the group's configuration and any changes made
+    '''
     ret = {'result': None, 'comment': '', 'changes': {}}
     exists = __salt__['boto_secgroup.exists'](name, None, vpc_id, region, key,
                                               keyid, profile)
@@ -169,6 +181,10 @@ def _security_group_present(
 
 
 def _get_rule_changes(rules, _rules):
+    '''
+    given a list of desired rules (rules) and existing rules (_rules) return
+    a list of rules to delete (to_delete) and to create (to_create)
+    '''
     to_delete = []
     to_create = []
 
@@ -260,6 +276,12 @@ def _rules_present(
         key,
         keyid,
         profile):
+    '''
+    given a group name or group name and vpc_id:
+    1. get lists of desired rule changes (using _get_rule_changes)
+    2. delete/revoke or authorize/create rules
+    3. return 'old' and 'new' group rules
+    '''
     ret = {'result': None, 'comment': '', 'changes': {}}
     sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region, key,
                                               keyid, profile)
@@ -324,6 +346,28 @@ def absent(
         key=None,
         keyid=None,
         profile=None):
+    '''
+    Ensure a security group with the specified name does not exist.
+
+    name
+        Name of the security group.
+
+    vpc_id
+        The ID of the VPC to create the security group in, if any.
+
+    region
+        Region to connect to.
+
+    key
+        Secret key to be used.
+
+    keyid
+        Access key to be used.
+
+    profile
+        A dict with region, key and keyid, or a pillar key (string)
+        that contains a dict with region, key and keyid.
+    '''
     ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
 
     sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region, key,
