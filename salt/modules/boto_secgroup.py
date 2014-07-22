@@ -78,7 +78,9 @@ def _get_group(conn, group_id):
     '''
     given a security group id returns a group
     '''
-    # groups is only can contain one group as group id is unique
+    # given that a group_id is unique,
+    # groups = conn.get_all_security_groups(group_ids=[group_id])
+    # will only ever contain one or zero objects
     groups = conn.get_all_security_groups(group_ids=[group_id])
     _add_group_to_context(groups[0])
     if len(groups) == 1:
@@ -89,7 +91,7 @@ def _get_group(conn, group_id):
 
 def _get_group_from_context(group_id=None, name=None, vpc_id=None):
     '''
-    given a name, name and vpc_id or group_id return a group.
+    given a name, name and vpc_id or group_id return a group from context.
     Use to decrease API calls.
     '''
     # set boto_secgroup.groups = to {} if boto_secgroup.groups does not exist
