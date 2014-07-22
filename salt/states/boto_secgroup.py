@@ -66,6 +66,12 @@ as a passed in dict, or as a string to pull from pillars or minion config:
                 keyid: GKTADJGHEIQSXMKKRBJ08H
                 key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 '''
+
+# Import Python libs
+import logging
+
+log = logging.getLogger(__name__)
+
 import salt.utils.dictupdate as dictupdate
 from salt.exceptions import SaltInvocationError
 
@@ -80,8 +86,8 @@ def __virtual__():
 def present(
         name,
         description,
-        vpc_id=None,
         rules=None,
+        vpc_id=None,
         region=None,
         key=None,
         keyid=None,
@@ -125,7 +131,7 @@ def present(
             return ret
     if not rules:
         rules = []
-    _ret = _rules_present(name, rules, region, key, keyid, profile)
+    _ret = _rules_present(name, rules, vpc_id, region, key, keyid, profile)
     ret['changes'] = dictupdate.update(ret['changes'], _ret['changes'])
     ret['comment'] = ' '.join([ret['comment'], _ret['comment']])
     if _ret['result'] is not None:
@@ -141,9 +147,15 @@ def _security_group_present(
         key,
         keyid,
         profile):
+    '''
+    given a group name or a group name and vpc id:
+    1. determine if the group exists
+    2. if the group does not exist, creates the group
+    3. return the group's configuration and any changes made
+    '''
     ret = {'result': None, 'comment': '', 'changes': {}}
-    exists = __salt__['boto_secgroup.exists'](name, region, key, keyid,
-                                              profile)
+    exists = __salt__['boto_secgroup.exists'](name, None, vpc_id, region, key,
+                                              keyid, profile)
     if not exists:
         if __opts__['test']:
             msg = 'Security group {0} is set to be created.'.format(name)
@@ -154,7 +166,8 @@ def _security_group_present(
         if created:
             ret['result'] = True
             ret['changes']['old'] = {'secgroup': None}
-            sg = __salt__['boto_secgroup.get_config'](name, None, region, key,
+            sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id,
+                                                      region, key,
                                                       keyid, profile)
             ret['changes']['new'] = {'secgroup': sg}
             ret['comment'] = 'Security group {0} created.'.format(name)
@@ -168,8 +181,17 @@ def _security_group_present(
 
 
 def _get_rule_changes(rules, _rules):
+    '''
+    given a list of desired rules (rules) and existing rules (_rules) return
+    a list of rules to delete (to_delete) and to create (to_create)
+    '''
     to_delete = []
     to_create = []
+
+    # for each rule in state file
+    # 1. validate rule
+    # 2. determine if rule exists in existing security group rules
+
     for rule in rules:
         try:
             ip_protocol = rule.get('ip_protocol')
@@ -199,6 +221,8 @@ def _get_rule_changes(rules, _rules):
                                       ' source_group_name must be provided for'
                                       ' security group rules.')
         rule_found = False
+        # for each rule in existing security group ruleset determine if
+        # new rule exists
         for _rule in _rules:
             if (ip_protocol == _rule['ip_protocol'] and
                     from_port == _rule['from_port'] and
@@ -213,6 +237,8 @@ def _get_rule_changes(rules, _rules):
         if not rule_found:
             to_create.append(rule)
 
+    # for each rule in existing security group configuration
+    # 1. determine if rules needed to be deleted
     for _rule in _rules:
         _ip_protocol = _rule.get('ip_protocol')
         _to_port = _rule.get('to_port')
@@ -245,18 +271,27 @@ def _get_rule_changes(rules, _rules):
 def _rules_present(
         name,
         rules,
+        vpc_id,
         region,
         key,
         keyid,
         profile):
+    '''
+    given a group name or group name and vpc_id:
+    1. get lists of desired rule changes (using _get_rule_changes)
+    2. delete/revoke or authorize/create rules
+    3. return 'old' and 'new' group rules
+    '''
     ret = {'result': None, 'comment': '', 'changes': {}}
-    sg = __salt__['boto_secgroup.get_config'](name, None, region, key, keyid,
-                                              profile)
+    sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region, key,
+                                              keyid, profile)
     if not sg:
         msg = '{0} security group configuration could not be retreived.'
         ret['comment'] = msg.format(name)
         ret['result'] = False
         return ret
+    # rules = rules that exist in salt state
+    # sg['rules'] = that exist in present group
     to_delete, to_create = _get_rule_changes(rules, sg['rules'])
     if to_create or to_delete:
         if __opts__['test']:
@@ -267,8 +302,8 @@ def _rules_present(
             deleted = True
             for rule in to_delete:
                 _deleted = __salt__['boto_secgroup.revoke'](
-                    name, region=region, key=key, keyid=keyid, profile=profile,
-                    **rule)
+                    name, vpc_id=vpc_id, region=region, key=key, keyid=keyid,
+                    profile=profile, **rule)
                 if not _deleted:
                     deleted = False
             if deleted:
@@ -283,8 +318,8 @@ def _rules_present(
             created = True
             for rule in to_create:
                 _created = __salt__['boto_secgroup.authorize'](
-                    name, region=region, key=key, keyid=keyid, profile=profile,
-                    **rule)
+                    name, vpc_id=vpc_id, region=region, key=key, keyid=keyid,
+                    profile=profile, **rule)
                 if not _created:
                     created = False
             if created:
@@ -297,22 +332,46 @@ def _rules_present(
                 ret['comment'] = ' '.join([ret['comment'], msg.format(name)])
                 ret['result'] = False
         ret['changes']['old'] = {'rules': sg['rules']}
-        sg = __salt__['boto_secgroup.get_config'](name, None, region, key,
-                                                  keyid, profile)
+        sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region,
+                                                  key, keyid, profile,
+                                                  allow_context=False)
         ret['changes']['new'] = {'rules': sg['rules']}
     return ret
 
 
 def absent(
         name,
+        vpc_id=None,
         region=None,
         key=None,
         keyid=None,
         profile=None):
+    '''
+    Ensure a security group with the specified name does not exist.
+
+    name
+        Name of the security group.
+
+    vpc_id
+        The ID of the VPC to create the security group in, if any.
+
+    region
+        Region to connect to.
+
+    key
+        Secret key to be used.
+
+    keyid
+        Access key to be used.
+
+    profile
+        A dict with region, key and keyid, or a pillar key (string)
+        that contains a dict with region, key and keyid.
+    '''
     ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
 
-    sg = __salt__['boto_secgroup.get_config'](name, None, region, key, keyid,
-                                              profile)
+    sg = __salt__['boto_secgroup.get_config'](name, None, vpc_id, region, key,
+                                              keyid, profile)
     if sg:
         if __opts__['test']:
             ret['result'] = None
@@ -320,7 +379,7 @@ def absent(
             ret['comment'] = msg
             return ret
         deleted = __salt__['boto_secgroup.delete'](name, None, region, key,
-                                                   keyid, profile)
+                                                   keyid, profile, vpc_id)
         if deleted:
             ret['result'] = True
             ret['changes']['old'] = {'secgroup': sg}

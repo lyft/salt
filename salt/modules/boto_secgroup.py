@@ -61,11 +61,72 @@ def __virtual__():
     return True
 
 
+def _add_group_to_context(group):
+    '''
+    adds the group object to the context for reuse. Used to decrease API calls.
+    '''
+    logging.debug('adding group_id {0} to context'.format(group.id))
+    if __context__.get('boto_secgroup.groups') is None:
+        # if _get_group_id does not exist, create a dict to hold group ids
+        __context__['boto_secgroup.groups'] = {}
+    # push the group id, name and vpc_id into context
+    context_entry = {group.id: group}
+    __context__['boto_secgroup.groups'].update(context_entry)
+
+
+def _get_group(conn, group_id):
+    '''
+    given a security group id returns a group
+    '''
+    # given that a group_id is unique,
+    # groups = conn.get_all_security_groups(group_ids=[group_id])
+    # will only ever contain one or zero objects
+    groups = conn.get_all_security_groups(group_ids=[group_id])
+    _add_group_to_context(groups[0])
+    if len(groups) == 1:
+        return groups[0]
+    else:
+        return None
+
+
+def _get_group_from_context(group_id=None, name=None, vpc_id=None):
+    '''
+    given a name, name and vpc_id or group_id return a group from context.
+    Use to decrease API calls.
+    '''
+    # set boto_secgroup.groups = to {} if boto_secgroup.groups does not exist
+    __context__.setdefault('boto_secgroup.groups',{})
+    group = None
+    if group_id:
+        logging.debug('lookup of group id {0} in context'.format(group_id))
+        if __context__['boto_secgroup.groups'].get(group_id):
+            group = __context__['boto_secgroup.groups'][group_id]
+            logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
+        else:
+            logging.debug('group_id {1} not found in context.'.format(group_id))
+    if name:
+        logging.debug('lookup of group name {0} in context'.format(name))
+        # search for group in context
+        for _group in __context__['boto_secgroup.groups']:
+            if (__context__['boto_secgroup.groups'][_group].name == name
+                    and __context__['boto_secgroup.groups'][_group].vpc_id == vpc_id):
+                group = __context__['boto_secgroup.groups'][_group]
+                logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
+            else:
+                logging.debug('group name {0} not found in context.'.format(name))
+    # return None if group not found or group if found
+    return group
+
+
 def _get_group_id(conn, name, vpc_id=None):
     '''
     Given a name or name and vpc_id return a group id or None.
     '''
     logging.debug('getting group_id for {0}'.format(name))
+    # search the context (_get_group) for an id to return
+    group = _get_group_from_context(name=name, vpc_id=vpc_id)
+    if group:
+        return group.id
     if vpc_id is None:
         group_filter = {'group-name': name}
         filtered_groups = conn.get_all_security_groups(filters=group_filter)
@@ -76,34 +137,24 @@ def _get_group_id(conn, name, vpc_id=None):
         for group in filtered_groups:
             # a group in EC2-Classic will have vpc_id set to None
             if group.vpc_id is None:
-                logging.debug("ec2-vpc security group {0} with group_id {1} found."
+                _add_group_to_context(filtered_groups[0])
+                logging.debug("ec2-vpc security group {0} with group_id {1} found via API."
                               .format(name, filtered_groups[0].id))
+                # push the group id, name and vpc_id None into context
                 return group.id
         return None
     elif vpc_id:
         group_filter = {'group-name': name, 'vpc_id': vpc_id}
         filtered_groups = conn.get_all_security_groups(filters=group_filter)
         if len(filtered_groups) == 1:
-            logging.debug("ec2-vpc security group {0} with group_id {1} found."
+            logging.debug("ec2-vpc security group {0} with group_id {1} found via API."
                           .format(name, filtered_groups[0].id))
+            _add_group_to_context(filtered_groups[0])
             return filtered_groups[0].id
         else:
             return None
     else:
         return None
-
-
-def _exists_group_id(conn, group_id):
-    '''
-    Given a group id check to see if the security group exists
-    '''
-    logging.debug('ec2-vpc security group lookup by group_id')
-    group_filter = {'group-id': group_id}
-    filtered_groups = conn.get_all_security_groups(filters=group_filter)
-    if len(filtered_groups) == 1:
-        return True
-    else:
-        return False
 
 
 def exists(name=None, group_id=None, vpc_id=None, region=None, key=None, keyid=None,
@@ -123,15 +174,16 @@ def exists(name=None, group_id=None, vpc_id=None, region=None, key=None, keyid=N
     conn = _get_conn(region, key, keyid, profile)
     if not conn:
         return False
-    try:
-        if name:
-            group_id = _get_group_id(conn, name, vpc_id)
-        if group_id:
-            return _exists_group_id(conn, group_id)
-        else:
-            return False
-    except boto.exception.BotoServerError as e:
-        log.debug(e)
+    group = False
+    # locate a group - first convert to group_id then call API
+    # if _get_group is extended to support name and vpc_id this becomes simple
+    if name:
+        group_id = _get_group_id(conn, name, vpc_id)
+    if group_id:
+        group = _get_group(conn, group_id)
+    if group:
+        return True
+    else:
         return False
 
 
@@ -161,7 +213,7 @@ def _split_rules(rules):
 
 
 def get_config(name=None, group_id=None, vpc_id=None, region=None, key=None,
-               keyid=None, profile=None):
+               keyid=None, profile=None, allow_context=True):
     '''
     Get the configuration for a security group.
 
@@ -181,22 +233,21 @@ def get_config(name=None, group_id=None, vpc_id=None, region=None, key=None,
         return None
     if not (name or group_id):
         return None
-    try:
-        sg = None
-        if name:
-            group_id = _get_group_id(conn, name, vpc_id)
-        if group_id:
-            group_filter = {'group-id': group_id}
-            filtered_groups = conn.get_all_security_groups(filters=group_filter)
-            if len(filtered_groups) == 1:
-                sg = filtered_groups[0]
+    sg = None
+    if name:
+        group_id = _get_group_id(conn, name, vpc_id)
+    if group_id:
+        # there are instances where the group_object in the context should
+        # not be used - for instance, if comparing group_id.rules
+        # before and after a rule change
+        if allow_context is True:
+            sg = _get_group_from_context(group_id=group_id)
         if sg is None:
-            return {}
-    except boto.exception.BotoServerError as e:
-        msg = 'Failed to get config for security group {0}.'.format(name)
-        log.error(msg)
-        log.debug(e)
+            logging.debug('group_object does not exist in context or allow_context=False. Getting object.')
+            sg = _get_group(conn, group_id)
+    if sg is None:
         return {}
+
     ret = odict.OrderedDict()
     ret['name'] = sg.name
     ret['group_id'] = sg.id
@@ -240,7 +291,7 @@ def get_config(name=None, group_id=None, vpc_id=None, region=None, key=None,
 def create(name, description, vpc_id=None, region=None, key=None, keyid=None,
            profile=None):
     '''
-    Create an autoscale group.
+    Create a security group.
 
     CLI examples::
 
@@ -258,6 +309,7 @@ def create(name, description, vpc_id=None, region=None, key=None, keyid=None,
         return False
     if created:
         log.info('Created security group {0}.'.format(name))
+        _add_group_to_context(created)
         return True
     else:
         msg = 'Failed to create security group {0}.'.format(name)
