@@ -196,6 +196,7 @@ def _split_rules(rules):
     rules, however, is done as a split set of rules. This function splits the
     rules up.
     '''
+    print rules.__class__
     split = []
     for rule in rules:
         ip_protocol = rule.get('ip_protocol')
@@ -209,6 +210,7 @@ def _split_rules(rules):
             for key, val in grant.iteritems():
                 _rule[key] = val
             split.append(_rule)
+    print split
     return split
 
 
