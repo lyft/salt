@@ -82,8 +82,8 @@ def _get_group(conn, group_id):
     # groups = conn.get_all_security_groups(group_ids=[group_id])
     # will only ever contain one or zero objects
     groups = conn.get_all_security_groups(group_ids=[group_id])
-    _add_group_to_context(groups[0])
     if len(groups) == 1:
+        _add_group_to_context(groups[0])
         return groups[0]
     else:
         return None
@@ -103,7 +103,7 @@ def _get_group_from_context(group_id=None, name=None, vpc_id=None):
             group = __context__['boto_secgroup.groups'][group_id]
             logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
         else:
-            logging.debug('group_id {1} not found in context.'.format(group_id))
+            logging.debug('group_id {0} not found in context.'.format(group_id))
     if name:
         logging.debug('lookup of group name {0} in context'.format(name))
         # search for group in context
