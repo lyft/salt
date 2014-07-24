@@ -103,7 +103,7 @@ def _get_group_from_context(group_id=None, name=None, vpc_id=None):
             group = __context__['boto_secgroup.groups'][group_id]
             logging.debug('group name {0} with group_id {1} found in context.'.format(group.name, group.id))
         else:
-            logging.debug('group_id {1} not found in context.'.format(group_id))
+            logging.debug('group_id {0} not found in context.'.format(group_id))
     if name:
         logging.debug('lookup of group name {0} in context'.format(name))
         # search for group in context
