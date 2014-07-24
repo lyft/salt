@@ -82,8 +82,8 @@ def _get_group(conn, group_id):
     # groups = conn.get_all_security_groups(group_ids=[group_id])
     # will only ever contain one or zero objects
     groups = conn.get_all_security_groups(group_ids=[group_id])
-    _add_group_to_context(groups[0])
     if len(groups) == 1:
+        _add_group_to_context(groups[0])
         return groups[0]
     else:
         return None
