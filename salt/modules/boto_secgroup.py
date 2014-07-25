@@ -95,7 +95,7 @@ def _get_group_from_context(group_id=None, name=None, vpc_id=None):
     Use to decrease API calls.
     '''
     # set boto_secgroup.groups = to {} if boto_secgroup.groups does not exist
-    __context__.setdefault('boto_secgroup.groups',{})
+    __context__.setdefault('boto_secgroup.groups', {})
     group = None
     if group_id:
         logging.debug('lookup of group id {0} in context'.format(group_id))
@@ -137,10 +137,9 @@ def _get_group_id(conn, name, vpc_id=None):
         for group in filtered_groups:
             # a group in EC2-Classic will have vpc_id set to None
             if group.vpc_id is None:
-                _add_group_to_context(filtered_groups[0])
+                _add_group_to_context(group)
                 logging.debug("ec2-vpc security group {0} with group_id {1} found via API."
-                              .format(name, filtered_groups[0].id))
-                # push the group id, name and vpc_id None into context
+                              .format(name, group.id))
                 return group.id
         return None
     elif vpc_id:
