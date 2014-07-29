@@ -14,12 +14,12 @@ Connection module for Amazon VPC
     If IAM roles are not used you need to specify them either in a pillar or
     in the minion's config file::
 
-        asg.keyid: GKTADJGHEIQSXMKKRBJ08H
-        asg.key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+        vpc.keyid: GKTADJGHEIQSXMKKRBJ08H
+        vpc.key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 
     A region may also be specified in the configuration::
 
-        asg.region: us-east-1
+        vpc.region: us-east-1
 
     If a region is not specified, the default is us-east-1.
 
