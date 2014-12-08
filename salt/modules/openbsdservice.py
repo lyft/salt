@@ -7,6 +7,9 @@ The service module for OpenBSD
 import os
 import logging
 
+# Import Salt libs
+import salt.utils
+
 log = logging.getLogger(__name__)
 
 # XXX enable/disable support would be nice
@@ -127,7 +130,7 @@ def _get_rc():
     try:
         # now read the system startup script /etc/rc
         # to know what are the system enabled daemons
-        with open('/etc/rc', 'r') as handle:
+        with salt.utils.fopen('/etc/rc', 'r') as handle:
             lines = handle.readlines()
     except IOError:
         log.error('Unable to read /etc/rc')
@@ -145,7 +148,10 @@ def _get_rc():
 
     # this will execute rc.conf and rc.conf.local
     # used in /etc/rc at boot to start the daemons
-    variables = __salt__['cmd.run']('(. /etc/rc.conf && set)', clean_env=True, output_loglevel='quiet').split('\n')
+    variables = __salt__['cmd.run']('(. /etc/rc.conf && set)',
+                                    clean_env=True,
+                                    output_loglevel='quiet',
+                                    python_shell=True).split('\n')
     for var in variables:
         match = service_flags_regex.match(var)
         if match:

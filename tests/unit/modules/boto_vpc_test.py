@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 
-# import Python Third Party Libs
+# import Third Party Libs
+# pylint: disable=import-error,no-name-in-module
 try:
     import boto
     HAS_BOTO = True
@@ -25,7 +26,8 @@ except ImportError:
         return stub_function
 
 # Import Python libs
-from distutils.version import LooseVersion
+from distutils.version import LooseVersion  # pylint: disable=no-name-in-module
+# pylint: enable=import-error
 
 # Import Salt Libs
 from salt.modules import boto_vpc
@@ -126,5 +128,5 @@ class BotoVpcTestCase(TestCase):
 
 
 if __name__ == '__main__':
-    from integration import run_tests
+    from integration import run_tests  # pylint: disable=import-error
     run_tests(BotoVpcTestCase, needs_daemon=False)

@@ -1081,6 +1081,8 @@ class Minion(MinionBase):
                 ret['out'] = 'nested'
         else:
             ret['return'] = '{0!r} is not available.'.format(function_name)
+            ret['success'] = False
+            ret['retcode'] = 254
             ret['out'] = 'nested'
 
         ret['jid'] = data['jid']
@@ -1766,7 +1768,7 @@ class Minion(MinionBase):
         self._running = False
         if getattr(self, 'poller', None) is not None:
             if isinstance(self.poller.sockets, dict):
-                for socket in self.poller.sockets:
+                for socket in self.poller.sockets.keys():
                     if socket.closed is False:
                         socket.close()
                     self.poller.unregister(socket)
@@ -2427,6 +2429,20 @@ class Matcher(object):
                       'statement from master')
             return False
         return salt.utils.subdict_match(self.opts['pillar'], tgt, delim=delim)
+
+    def pillar_exact_match(self, tgt, delim=':'):
+        '''
+        Reads in the pillar match, no globbing
+        '''
+        log.debug('pillar target: {0}'.format(tgt))
+        if delim not in tgt:
+            log.error('Got insufficient arguments for pillar match '
+                      'statement from master')
+            return False
+        return salt.utils.subdict_match(self.opts['pillar'],
+                                        tgt,
+                                        delim=delim,
+                                        exact_match=True)
 
     def ipcidr_match(self, tgt):
         '''

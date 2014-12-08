@@ -19,8 +19,7 @@ try:
     from raet import raeting, nacling
     from raet.lane.stacking import LaneStack
     from raet.lane.yarding import RemoteYard
-
-except ImportError:
+except (ImportError, OSError):
     # Don't die on missing transport libs since only one transport is required
     pass
 
@@ -166,8 +165,12 @@ class RAETChannel(Channel):
             if time.time() - start > timeout:
                 if tried >= tries:
                     raise ValueError("Message send timed out after '{0} * {1}'"
-                             " secs on route = {1}".format(tries, timeout, self.route))
-                #self.stack.transmit(msg, self.stack.nameRemotes['manor'].uid)
+                             " secs. route = {2} track = {3} load={4}".format(tries,
+                                                                       timeout,
+                                                                       self.route,
+                                                                       track,
+                                                                       load))
+                self.stack.transmit(msg, self.stack.nameRemotes['manor'].uid)
                 tried += 1
             time.sleep(0.01)
         return jobber_rxMsgs.pop(track).get('return', {})
@@ -202,7 +205,8 @@ class ZeroMQChannel(Channel):
             if master_type == 'failover':
                 # remove all cached sreqs to the old master to prevent
                 # zeromq from reconnecting to old masters automagically
-                for check_key in self.sreq_cache:
+                # iterate over a copy since we will mutate the dict
+                for check_key in self.sreq_cache.keys():
                     if self.opts['master_uri'] != check_key[0]:
                         del self.sreq_cache[check_key]
                         log.debug('Removed obsolete sreq-object from '

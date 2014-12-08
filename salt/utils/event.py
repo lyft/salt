@@ -57,7 +57,6 @@ import logging
 import time
 import datetime
 import multiprocessing
-from multiprocessing import Process
 from collections import MutableMapping
 
 # Import third party libs
@@ -290,8 +289,9 @@ class SaltEvent(object):
                 continue
 
             try:
-                ret = self.get_event_block()  # Please do not use non-blocking mode here.
-                                              # Reliability is more important than pure speed on the event bus.
+                # Please do not use non-blocking mode here.
+                # Reliability is more important than pure speed on the event bus.
+                ret = self.get_event_block()
             except zmq.ZMQError as ex:
                 if ex.errno == errno.EAGAIN or ex.errno == errno.EINTR:
                     continue
@@ -301,7 +301,8 @@ class SaltEvent(object):
             if not ret['tag'].startswith(tag):  # tag not match
                 if any(ret['tag'].startswith(ptag) for ptag in pending_tags):
                     self.pending_events.append(ret)
-                wait = timeout_at - time.time()
+                if wait:  # only update the wait timeout if we had one
+                    wait = timeout_at - time.time()
                 continue
 
             log.trace('get_event() received = {0}'.format(ret))
@@ -427,7 +428,7 @@ class SaltEvent(object):
         # that poller gets garbage collected. The Poller itself, its
         # registered sockets and the Context
         if isinstance(self.poller.sockets, dict):
-            for socket in self.poller.sockets:
+            for socket in self.poller.sockets.keys():
                 if socket.closed is False:
                     socket.setsockopt(zmq.LINGER, linger)
                     socket.close()
@@ -508,7 +509,7 @@ class MinionEvent(SaltEvent):
         super(MinionEvent, self).__init__('minion', sock_dir=opts.get('sock_dir', None), opts=opts)
 
 
-class EventPublisher(Process):
+class EventPublisher(multiprocessing.Process):
     '''
     The interface that takes master events and republishes them out to anyone
     who wants to listen
@@ -704,8 +705,8 @@ class ReactWrap(object):
         LowData
         '''
         l_fun = getattr(self, low['state'])
-        f_call = salt.utils.format_call(l_fun, low)
         try:
+            f_call = salt.utils.format_call(l_fun, low)
             ret = l_fun(*f_call.get('args', ()), **f_call.get('kwargs', {}))
         except Exception:
             log.error(

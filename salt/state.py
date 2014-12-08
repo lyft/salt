@@ -1855,9 +1855,28 @@ class State(object):
                 running[tag]['__sls__'] = low['__sls__']
             # otherwise the failure was due to a requisite down the chain
             else:
+                # determine what the requisite failures where, and return
+                # a nice error message
+                comment_dict = {}
+                # look at all requisite types for a failure
+                for req_type, req_lows in reqs.iteritems():
+                    for req_low in req_lows:
+                        req_tag = _gen_tag(req_low)
+                        req_ret = self.pre.get(req_tag, running.get(req_tag))
+                        # if there is no run output for the requisite it
+                        # can't be the failure
+                        if req_ret is None:
+                            continue
+                        # If the result was False (not None) it was a failure
+                        if req_ret['result'] is False:
+                            # use SLS.ID for the key-- so its easier to find
+                            key = '{sls}.{_id}'.format(sls=req_low['__sls__'],
+                                                       _id=req_low['__id__'])
+                            comment_dict[key] = req_ret['comment']
+
                 running[tag] = {'changes': {},
                                 'result': False,
-                                'comment': 'One or more requisite failed',
+                                'comment': 'One or more requisite failed: {0}'.format(comment_dict),
                                 '__run_num__': self.__run_num,
                                 '__sls__': low['__sls__']}
             self.__run_num += 1
@@ -1922,6 +1941,8 @@ class State(object):
         for l_dict in listeners:
             for key, val in l_dict.items():
                 for listen_to in val:
+                    if not isinstance(listen_to, dict):
+                        continue
                     for lkey, lval in listen_to.items():
                         if (lkey, lval) not in crefs:
                             rerror = {_l_tag(lkey, lval):

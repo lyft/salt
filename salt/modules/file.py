@@ -844,16 +844,13 @@ def psed(path,
 
     shutil.copy2(path, '{0}{1}'.format(path, backup))
 
-    try:
-        ofile = salt.utils.fopen(path, 'w')
+    with salt.utils.fopen(path, 'w') as ofile:
         with salt.utils.fopen('{0}{1}'.format(path, backup), 'r') as ifile:
             if multi is True:
                 for line in ifile.readline():
                     ofile.write(_psed(line, before, after, limit, flags))
             else:
                 ofile.write(_psed(ifile.read(), before, after, limit, flags))
-    finally:
-        ofile.close()
 
 
 RE_FLAG_TABLE = {'I': re.I,
@@ -1125,10 +1122,10 @@ def replace(path,
     repl = str(repl)
     try:
         fi_file = fileinput.input(path,
-                        inplace=not dry_run,
+                        inplace=not (dry_run or search_only),
                         backup=False if dry_run else backup,
                         bufsize=bufsize,
-                        mode='rb')
+                        mode='r' if (dry_run or search_only) else 'rb')
         found = False
         for line in fi_file:
 
@@ -1162,7 +1159,7 @@ def replace(path,
         if None == not_found_content:
             not_found_content = repl
         if prepend_if_not_found:
-            new_file.insert(not_found_content + '\n')
+            new_file.insert(0, not_found_content + '\n')
         else:
             # append_if_not_found
             # Make sure we have a newline at the end of the file
@@ -1678,7 +1675,8 @@ def prepend(path, *args, **kwargs):
             args = [kwargs['args']]
 
     try:
-        contents = salt.utils.fopen(path).readlines()
+        with salt.utils.fopen(path) as fhr:
+            contents = fhr.readlines()
     except IOError:
         contents = []
 
@@ -1763,7 +1761,8 @@ def touch(name, atime=None, mtime=None):
         mtime = int(mtime)
     try:
         if not os.path.exists(name):
-            salt.utils.fopen(name, 'a')
+            with salt.utils.fopen(name, 'a') as fhw:
+                fhw.write('')
 
         if not atime and not mtime:
             times = None
@@ -1862,11 +1861,8 @@ def truncate(path, length):
 
         salt '*' file.truncate /path/to/file 512
     '''
-    try:
-        seek_fh = open(path, 'r+')
+    with salt.utils.fopen(path, 'r+') as seek_fh:
         seek_fh.truncate(int(length))
-    finally:
-        seek_fh.close()
 
 
 def link(src, path):
@@ -2590,34 +2586,34 @@ def extract_hash(hash_fn, hash_type='sha256', file_name=''):
     name_sought = re.findall(r'^(.+)/([^/]+)$', '/x' + file_name)[0][1]
     log.debug('modules.file.py - extract_hash(): Extracting hash for file '
               'named: {0}'.format(name_sought))
-    hash_fn_fopen = salt.utils.fopen(hash_fn, 'r')
-    for hash_variant in HASHES:
-        if hash_type == '' or hash_type == hash_variant[0]:
-            log.debug('modules.file.py - extract_hash(): Will use regex to get'
-                ' a purely hexadecimal number of length ({0}), presumably hash'
-                ' type : {1}'.format(hash_variant[1], hash_variant[0]))
-            hash_fn_fopen.seek(0)
-            for line in hash_fn_fopen.read().splitlines():
-                hash_array = re.findall(r'(?i)(?<![a-z0-9])[a-f0-9]{' + str(hash_variant[1]) + '}(?![a-z0-9])', line)
-                log.debug('modules.file.py - extract_hash(): From "line": {0} '
-                          'got : {1}'.format(line, hash_array))
-                if hash_array:
-                    if not partial_id:
-                        source_sum = {'hsum': hash_array[0], 'hash_type': hash_variant[0]}
-                        partial_id = True
+    with salt.utils.fopen(hash_fn, 'r') as hash_fn_fopen:
+        for hash_variant in HASHES:
+            if hash_type == '' or hash_type == hash_variant[0]:
+                log.debug('modules.file.py - extract_hash(): Will use regex to get'
+                    ' a purely hexadecimal number of length ({0}), presumably hash'
+                    ' type : {1}'.format(hash_variant[1], hash_variant[0]))
+                hash_fn_fopen.seek(0)
+                for line in hash_fn_fopen.read().splitlines():
+                    hash_array = re.findall(r'(?i)(?<![a-z0-9])[a-f0-9]{' + str(hash_variant[1]) + '}(?![a-z0-9])', line)
+                    log.debug('modules.file.py - extract_hash(): From "line": {0} '
+                              'got : {1}'.format(line, hash_array))
+                    if hash_array:
+                        if not partial_id:
+                            source_sum = {'hsum': hash_array[0], 'hash_type': hash_variant[0]}
+                            partial_id = True
 
-                    log.debug('modules.file.py - extract_hash(): Found: {0} '
-                              '-- {1}'.format(source_sum['hash_type'],
-                                              source_sum['hsum']))
+                        log.debug('modules.file.py - extract_hash(): Found: {0} '
+                                  '-- {1}'.format(source_sum['hash_type'],
+                                                  source_sum['hsum']))
 
-                    if re.search(name_sought, line):
-                        source_sum = {'hsum': hash_array[0], 'hash_type': hash_variant[0]}
-                        log.debug('modules.file.py - extract_hash: For {0} -- '
-                                  'returning the {1} hash "{2}".'.format(
-                                      name_sought,
-                                      source_sum['hash_type'],
-                                      source_sum['hsum']))
-                        return source_sum
+                        if re.search(name_sought, line):
+                            source_sum = {'hsum': hash_array[0], 'hash_type': hash_variant[0]}
+                            log.debug('modules.file.py - extract_hash: For {0} -- '
+                                      'returning the {1} hash "{2}".'.format(
+                                          name_sought,
+                                          source_sum['hash_type'],
+                                          source_sum['hsum']))
+                            return source_sum
 
     if partial_id:
         log.debug('modules.file.py - extract_hash: Returning the partially '
@@ -2793,6 +2789,59 @@ def check_managed(
                         for key, val in changes.iteritems())
         return None, ''.join(comments)
     return True, 'The file {0} is in the correct state'.format(name)
+
+
+def check_managed_changes(
+        name,
+        source,
+        source_hash,
+        user,
+        group,
+        mode,
+        template,
+        context,
+        defaults,
+        saltenv,
+        contents=None,
+        **kwargs):
+    '''
+    Return a dictionary of what changes need to be made for a file
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' file.check_managed_changes /etc/httpd/conf.d/httpd.conf salt://http/httpd.conf '{hash_type: 'md5', 'hsum': <md5sum>}' root, root, '755' jinja True None None base
+    '''
+    # If the source is a list then find which file exists
+    source, source_hash = source_list(source,           # pylint: disable=W0633
+                                      source_hash,
+                                      saltenv)
+
+    sfn = ''
+    source_sum = None
+
+    if contents is None:
+        # Gather the source file from the server
+        sfn, source_sum, comments = get_managed(
+            name,
+            template,
+            source,
+            source_hash,
+            user,
+            group,
+            mode,
+            saltenv,
+            context,
+            defaults,
+            **kwargs)
+        if comments:
+            __clean_tmp(sfn)
+            return False, comments
+    changes = check_file_meta(name, sfn, source, source_sum, user,
+                              group, mode, saltenv, template, contents)
+    __clean_tmp(sfn)
+    return changes
 
 
 def check_file_meta(

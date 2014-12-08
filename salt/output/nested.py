@@ -46,8 +46,7 @@ class NestDisplay(object):
                 msg,
                 prefix='',
                 suffix='',
-                endc=None,
-                encoding='utf-8'):
+                endc=None):
         if endc is None:
             endc = self.colors['ENDC']
         try:
@@ -55,7 +54,7 @@ class NestDisplay(object):
                 indent, color, prefix, msg, endc, suffix)
         except UnicodeDecodeError:
             return u'{0}{1}{2}{3}{4}{5}\n'.format(
-                indent, color, prefix, msg.decode(encoding), endc, suffix)
+                indent, color, prefix, salt.utils.sdecode(msg), endc, suffix)
 
     def display(self, ret, indent, prefix, out):
         '''

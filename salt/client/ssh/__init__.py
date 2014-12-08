@@ -138,7 +138,7 @@ if not is_windows():
     if not os.path.exists(shim_file):
         # On esky builds we only have the .pyc file
         shim_file += "c"
-    with open(shim_file) as ssh_py_shim:
+    with salt.utils.fopen(shim_file) as ssh_py_shim:
         SSH_PY_SHIM = ssh_py_shim.read()
 
 log = logging.getLogger(__name__)
@@ -214,6 +214,7 @@ class SSH(object):
         self.serial = salt.payload.Serial(opts)
         self.returners = salt.loader.returners(self.opts, {})
         self.fsclient = salt.fileclient.FSClient(self.opts)
+        self.thin = salt.utils.thin.gen_thin(self.opts['cachedir'])
         self.mods = mod_data(self.fsclient)
 
     def get_pubkey(self):
@@ -229,7 +230,7 @@ class SSH(object):
                     )
                 )
         pub = '{0}.pub'.format(priv)
-        with open(pub, 'r') as fp_:
+        with salt.utils.fopen(pub, 'r') as fp_:
             return '{0} rsa root@master'.format(fp_.read().split()[1])
 
     def key_deploy(self, host, ret):
@@ -272,6 +273,7 @@ class SSH(object):
                 host,
                 mods=self.mods,
                 fsclient=self.fsclient,
+                thin=self.thin,
                 **target)
         if salt.utils.which('ssh-copy-id'):
             # we have ssh-copy-id, use it!
@@ -286,6 +288,7 @@ class SSH(object):
                     host,
                     mods=self.mods,
                     fsclient=self.fsclient,
+                    thin=self.thin,
                     **target)
             stdout, stderr, retcode = single.cmd_block()
             try:
@@ -310,6 +313,7 @@ class SSH(object):
                 host,
                 mods=self.mods,
                 fsclient=self.fsclient,
+                thin=self.thin,
                 **target)
         ret = {'id': single.id}
         stdout, stderr, retcode = single.run()
@@ -494,6 +498,7 @@ class Single(object):
             tty=False,
             mods=None,
             fsclient=None,
+            thin=None,
             **kwargs):
         self.opts = opts
         if kwargs.get('wipe'):
@@ -546,6 +551,7 @@ class Single(object):
         self.serial = salt.payload.Serial(opts)
         self.wfuncs = salt.loader.ssh_wrapper(opts, None, self.context)
         self.shell = salt.client.ssh.shell.Shell(opts, **args)
+        self.thin = thin if thin else salt.utils.thin.thin_path(opts['cachedir'])
 
     def __arg_comps(self):
         '''
@@ -585,13 +591,8 @@ class Single(object):
         '''
         Deploy salt-thin
         '''
-        if self.opts.get('_caller_cachedir'):
-            cachedir = self.opts.get('_caller_cachedir')
-        else:
-            cachedir = self.opts['cachedir']
-        thin = salt.utils.thin.gen_thin(cachedir)
         self.shell.send(
-            thin,
+            self.thin,
             os.path.join(self.thin_dir, 'salt-thin.tgz'),
         )
         self.deploy_ext()
@@ -676,6 +677,7 @@ class Single(object):
             opts_pkg['file_roots'] = self.opts['file_roots']
             opts_pkg['pillar_roots'] = self.opts['pillar_roots']
             opts_pkg['ext_pillar'] = self.opts['ext_pillar']
+            opts_pkg['extension_modules'] = self.opts['extension_modules']
             opts_pkg['_ssh_version'] = self.opts['_ssh_version']
             if '_caller_cachedir' in self.opts:
                 opts_pkg['_caller_cachedir'] = self.opts['_caller_cachedir']

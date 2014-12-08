@@ -27,13 +27,13 @@ import shutil
 import socket
 import stat
 import string
-import subprocess
 import sys
 import tempfile
 import time
 import types
 import warnings
 import yaml
+import locale
 from calendar import month_abbr as months
 from string import maketrans
 
@@ -305,10 +305,10 @@ def daemonize(redirect_out=True):
     # not cleanly redirected and the parent process dies when the
     # multiprocessing process attempts to access stdout or err.
     if redirect_out:
-        dev_null = open('/dev/null', 'r+')
-        os.dup2(dev_null.fileno(), sys.stdin.fileno())
-        os.dup2(dev_null.fileno(), sys.stdout.fileno())
-        os.dup2(dev_null.fileno(), sys.stderr.fileno())
+        with fopen('/dev/null', 'r+') as dev_null:
+            os.dup2(dev_null.fileno(), sys.stdin.fileno())
+            os.dup2(dev_null.fileno(), sys.stdout.fileno())
+            os.dup2(dev_null.fileno(), sys.stderr.fileno())
 
 
 def daemonize_if(opts):
@@ -1153,7 +1153,7 @@ def check_whitelist_blacklist(value, whitelist=None, blacklist=None):
     return ret
 
 
-def subdict_match(data, expr, delim=':', regex_match=False):
+def subdict_match(data, expr, delim=':', regex_match=False, exact_match=False):
     '''
     Check for a match in a dictionary using a delimiter character to denote
     levels of subdicts, and also allowing the delimiter character to be
@@ -1161,13 +1161,15 @@ def subdict_match(data, expr, delim=':', regex_match=False):
     data['foo']['bar'] == 'baz'. The former would take priority over the
     latter.
     '''
-    def _match(target, pattern, regex_match=False):
+    def _match(target, pattern, regex_match=False, exact_match=False):
         if regex_match:
             try:
                 return re.match(pattern.lower(), str(target).lower())
             except Exception:
                 log.error('Invalid regex {0!r} in match'.format(pattern))
                 return False
+        elif exact_match:
+            return str(target).lower() == pattern.lower()
         else:
             return fnmatch.fnmatch(str(target).lower(), pattern.lower())
 
@@ -1191,12 +1193,21 @@ def subdict_match(data, expr, delim=':', regex_match=False):
                 if isinstance(member, dict):
                     if matchstr.startswith('*:'):
                         matchstr = matchstr[2:]
-                    if subdict_match(member, matchstr, regex_match=regex_match):
+                    if subdict_match(member,
+                                     matchstr,
+                                     regex_match=regex_match,
+                                     exact_match=exact_match):
                         return True
-                if _match(member, matchstr, regex_match=regex_match):
+                if _match(member,
+                          matchstr,
+                          regex_match=regex_match,
+                          exact_match=exact_match):
                     return True
             continue
-        if _match(match, matchstr, regex_match=regex_match):
+        if _match(match,
+                  matchstr,
+                  regex_match=regex_match,
+                  exact_match=exact_match):
             return True
     return False
 
@@ -1857,11 +1868,26 @@ def warn_until(version,
         )
 
     if _dont_call_warnings is False:
+        def _formatwarning(message,
+                           category,
+                           filename,
+                           lineno,
+                           line=None):  # pylint: disable=W0613
+            '''
+            Replacement for warnings.formatwarning that disables the echoing of
+            the 'line' parameter.
+            '''
+            return '{0}:{1}: {2}: {3}'.format(
+                filename, lineno, category.__name__, message
+            )
+        saved = warnings.formatwarning
+        warnings.formatwarning = _formatwarning
         warnings.warn(
             message.format(version=version.formatted_version),
             category,
             stacklevel=stacklevel
         )
+        warnings.formatwarning = saved
 
 
 def kwargs_warn_until(kwargs,
@@ -2099,7 +2125,7 @@ def is_bin_file(path):
     if not os.path.isfile(path):
         return None
     try:
-        with open(path, 'r') as fp_:
+        with fopen(path, 'r') as fp_:
             return is_bin_str(fp_.read(2048))
     except os.error:
         return None
@@ -2333,7 +2359,7 @@ def import_json():
     for fast_json in ('ujson', 'yajl', 'json'):
         try:
             mod = __import__(fast_json)
-            log.info('loaded {0} json lib'.format(fast_json))
+            log.trace('loaded {0} json lib'.format(fast_json))
             return mod
         except ImportError:
             continue
@@ -2367,8 +2393,8 @@ def chugid(runas):
     # this does not appear to be strictly true.
     group_list = get_group_dict(runas, include_default=True)
     if sys.platform == 'darwin':
-        group_list = [a for a in group_list
-                      if not a.startswith('_')]
+        group_list = dict((k, v) for k, v in group_list.iteritems()
+                          if not k.startswith('_'))
     for group_name in group_list:
         gid = group_list[group_name]
         if (gid not in supgroups_seen
@@ -2421,3 +2447,37 @@ def chugid_and_umask(runas, umask):
 def rand_string(size=32):
     key = os.urandom(size)
     return key.encode('base64').replace('\n', '')
+
+
+@real_memoize
+def get_encodings():
+    '''
+    return a list of string encodings to try
+    '''
+    encodings = []
+    loc = locale.getdefaultlocale()[-1]
+    if loc:
+        encodings.append(loc)
+    encodings.append(sys.getdefaultencoding())
+    encodings.extend(['utf-8', 'latin-1'])
+    return encodings
+
+
+def sdecode(string):
+    '''
+    Since we don't know where a string is coming from and that string will
+    need to be safely decoded, this function will attempt to decode the string
+    until if has a working string that does not stack trace
+    '''
+    if not isinstance(string, str):
+        return string
+    encodings = get_encodings()
+    for encoding in encodings:
+        try:
+            decoded = string.decode(encoding)
+            # Make sure unicode string ops work
+            u' ' + decoded  # pylint: disable=W0104
+            return decoded
+        except UnicodeDecodeError:
+            continue
+    return string

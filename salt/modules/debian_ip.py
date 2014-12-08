@@ -257,7 +257,7 @@ def _parse_current_network_settings():
     opts['networking'] = ''
 
     if os.path.isfile(_DEB_NETWORKING_FILE):
-        with open(_DEB_NETWORKING_FILE) as contents:
+        with salt.utils.fopen(_DEB_NETWORKING_FILE) as contents:
             for line in contents:
                 if line.startswith('#'):
                     continue
@@ -405,7 +405,7 @@ IPV4_ATTR_MAP = {
     'broadcast': __ipv4_quad,
     'metric':  __int,
     'gateway':  __ipv4_quad,  # supports a colon-delimited list
-    'pointtopoint':  __ipv4_quad,
+    'pointopoint':  __ipv4_quad,
     'hwaddress':  __mac,
     'mtu':  __int,
     'scope': __within(['global', 'link', 'host'], dtype=str),
@@ -528,7 +528,7 @@ def _parse_interfaces(interface_files=None):
     method = -1
 
     for interface_file in interface_files:
-        with open(interface_file) as interfaces:
+        with salt.utils.fopen(interface_file) as interfaces:
             for line in interfaces:
                 # Identify the clauses by the first word of each line.
                 # Go to the next line if the current line is a comment
@@ -1086,6 +1086,8 @@ def _parse_bridge_opts(opts, iface):
     config = {}
 
     if 'ports' in opts:
+        if isinstance(opts['ports'], list):
+            opts['ports'] = ','.join(opts['ports'])
         config.update({'ports': opts['ports']})
 
     for opt in ['ageing', 'fd', 'gcint', 'hello', 'maxage']:
@@ -1445,9 +1447,8 @@ def _write_file_ppp_ifaces(iface, data):
         msg = msg.format(os.path.dirname(filename))
         log.error(msg)
         raise AttributeError(msg)
-    fout = salt.utils.fopen(filename, 'w')
-    fout.write(ifcfg)
-    fout.close()
+    with salt.utils.fopen(filename, 'w') as fout:
+        fout.write(ifcfg)
 
     # Return as a array so the difflib works
     return filename
@@ -1486,7 +1487,7 @@ def build_bond(iface, **settings):
         __salt__['cmd.run'](
             'sed -i -e "/^options\\s{0}.*/d" /etc/modprobe.conf'.format(iface)
         )
-        __salt__['cmd.run']('cat {0} >> /etc/modprobe.conf'.format(path))
+        __salt__['file.append']('/etc/modprobe.conf', path)
 
     # Load kernel module
     __salt__['kmod.load']('bonding')
@@ -1537,7 +1538,7 @@ def build_interface(iface, iface_type, enabled, **settings):
 
     elif iface_type == 'bridge':
         if 'ports' not in settings:
-            msg = 'ports is a required setting for bridge interfaces'
+            msg = 'ports is a required setting for bridge interfaces on Debian or Ubuntu based systems'
             log.error(msg)
             raise AttributeError(msg)
         __salt__['pkg.install']('bridge-utils')

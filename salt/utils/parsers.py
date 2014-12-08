@@ -293,6 +293,8 @@ class SaltfileMixIn(object):
             saltfile = os.path.join(os.getcwd(), 'Saltfile')
             if os.path.isfile(saltfile):
                 self.options.saltfile = saltfile
+        else:
+            saltfile = self.options.saltfile
 
         if not self.options.saltfile:
             # There's still no valid Saltfile? No need to continue...
@@ -371,6 +373,10 @@ class SaltfileMixIn(object):
                     setattr(self.options,
                             option.dest,
                             cli_config[option.dest])
+
+        # Any left over value in the saltfile can now be safely added
+        for key in cli_config:
+            setattr(self.options, key, cli_config[key])
 
 
 class HardCrashMixin(object):
@@ -662,7 +668,7 @@ class LogLevelMixIn(object):
                     # Yep, the user is in ACL!
                     # Let's write the logfile to its home directory instead.
                     xdg_dir = salt.utils.xdg.xdg_config_dir()
-                    user_salt_dir = xdg_dir if os.path.isdir(xdg_dir) else '~/.salt'
+                    user_salt_dir = xdg_dir if os.path.isdir(xdg_dir) else os.path.expanduser('~/.salt')
 
                     if not os.path.isdir(user_salt_dir):
                         os.makedirs(user_salt_dir, 0750)
@@ -994,6 +1000,12 @@ class OutputOptionsMixIn(object):
             default=False,
             action='store_true',
             help='Force colored output'
+        )
+        group.add_option(
+            '--state-output', '--state_output',
+            default='full',
+            help=('Override the configured state_output value for minion output'
+                  '. Default: full')
         )
 
         for option in self.output_options_group.option_list:
@@ -1413,12 +1425,6 @@ class SaltCMDOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
             dest='async',
             action='store_true',
             help=('Run the salt command but don\'t wait for a reply')
-        )
-        self.add_option(
-            '--state-output', '--state_output',
-            default='full',
-            help=('Override the configured state_output value for minion output'
-                  '. Default: full')
         )
         self.add_option(
             '--subset',
@@ -2167,6 +2173,12 @@ class SaltSSHOptionParser(OptionParser, ConfigDirMixIn, MergeConfigMixIn,
                  'This value defines how many processes are opened up at a '
                  'time to manage connections, the more running processes the '
                  'faster communication should be, default is %default'
+        )
+        self.add_option(
+            '--extra-filerefs',
+            dest='extra_filerefs',
+            default=None,
+            help='Pass in extra files to include in the state tarball'
         )
         self.add_option(
             '-v', '--verbose',

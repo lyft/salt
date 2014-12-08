@@ -618,7 +618,7 @@ def wait_for_port(host, port=22, timeout=900, gateway=None):
         trycount += 1
         # test gateway usage
         if not usable_gateway:
-            pstatus = _exec_ssh_cmd(pcmd, **kwargs)
+            pstatus = _exec_ssh_cmd(pcmd, allow_failure=True, **kwargs)
             if pstatus == 0:
                 usable_gateway = True
             else:
@@ -631,7 +631,7 @@ def wait_for_port(host, port=22, timeout=900, gateway=None):
                     'SSH gateway is reachable but we can not login')
         # then try to reach out the target
         if usable_gateway:
-            status = _exec_ssh_cmd(cmd, **kwargs)
+            status = _exec_ssh_cmd(cmd, allow_failure=True, **kwargs)
             # Get the exit code of the SSH command.
             # If 0 then the port is open.
             if status == 0:
@@ -2129,7 +2129,7 @@ def update_bootstrap(config, url=None):
         else:
             script_name = os.path.basename(url)
     elif os.path.exists(url):
-        with open(url) as fic:
+        with salt.utils.fopen(url) as fic:
             script_content = fic.read()
         script_name = os.path.basename(url)
     # in last case, assuming we got a script content

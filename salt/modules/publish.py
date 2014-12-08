@@ -51,11 +51,8 @@ def _publish(
 
         salt system.example.com publish.publish '*' cmd.run 'ls -la /tmp'
     '''
-    if fun == 'publish.publish':
-        log.info('Function name is \'publish.publish\'. Returning {}')
-        return {}
-    if expr_form.lower() in ('pillar', 'compound'):
-        log.error('Pillar/compound matching disabled for published commands.')
+    if fun.startswith('publish.'):
+        log.info('Cannot publish publish calls. Returning {}')
         return {}
 
     arg = [salt.utils.args.yamlify_arg(arg)]
@@ -146,6 +143,9 @@ def publish(tgt, fun, arg=None, expr_form='glob', returner='', timeout=5):
     - range
     - compound
 
+    Note that for pillar matches must be exact, both in the pillar matcher
+    and the compound matcher. No globbing is supported.
+
     The arguments sent to the minion publish function are separated with
     commas. This means that for a minion executing a command with multiple
     args it will look like this:
@@ -212,7 +212,8 @@ def full_data(tgt, fun, arg=None, expr_form='glob', returner='', timeout=5):
                     expr_form=expr_form,
                     returner=returner,
                     timeout=timeout,
-                    form='full')
+                    form='full',
+                    wait=True)
 
 
 def runner(fun, arg=None, timeout=5):
