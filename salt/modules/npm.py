@@ -125,7 +125,7 @@ def install(pkg=None,
     if runas:
         uid = salt.utils.get_uid(runas)
         if uid:
-            env.update({'SUDO_UID': uid, 'SUDO_USER': ''})
+            env.update({'SUDO_UID': b'{0}'.format(uid), 'SUDO_USER': b''})
 
     result = __salt__['cmd.run_all'](cmd, python_shell=False, cwd=dir, runas=runas, env=env)
 
