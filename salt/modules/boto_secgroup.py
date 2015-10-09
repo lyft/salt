@@ -100,8 +100,10 @@ def exists(name=None, region=None, key=None, keyid=None, profile=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    group = _get_group(conn, name, vpc_id, group_id, region, vpc_name,
-                       key, keyid, profile)
+    group = _get_group(
+        conn, name=name, vpc_id=vpc_id, group_id=group_id, region=region,
+        vpc_name=vpc_name, key=key, keyid=keyid, profile=profile
+    )
     if group:
         return True
     else:
@@ -142,7 +144,10 @@ def _get_group(conn, name=None, vpc_id=None, group_id=None, region=None,
     '''
     if name:
         if vpc_name:
-            vpc_id = __salt__['boto_vpc.check_vpc'](vpc_id, vpc_name, region, key, keyid, profile)
+            vpc_id = __salt__['boto_vpc.check_vpc'](
+                vpc_id=vpc_id, vpc_name=vpc_name, region=region, key=key,
+                keyid=keyid, profile=profile
+            )
         if vpc_id is None:
             log.debug('getting group for {0}'.format(name))
             group_filter = {'group-name': name}
@@ -227,8 +232,9 @@ def get_group_id(name, vpc_id=None, region=None, key=None, keyid=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    group = _get_group(conn, name, vpc_id, region, vpc_name, key, keyid,
-                       profile)
+    group = _get_group(conn, name=name, vpc_id=vpc_id, region=region,
+                       vpc_name=vpc_name, key=key, keyid=keyid,
+                       profile=profile)
     if group:
         return group.id
     else:
@@ -255,8 +261,10 @@ def convert_to_group_ids(groups, vpc_id=None, region=None, key=None, keyid=None,
         else:
             log.debug('calling boto_secgroup.get_group_id for'
                       ' group name {0}'.format(group))
-            group_id = get_group_id(group, vpc_id, region, key, keyid,
-                                    profile, vpc_name)
+            group_id = get_group_id(
+                group, vpc_id=vpc_id, region=region, key=key, keyid=keyid,
+                profile=profile, vpc_name=vpc_name
+            )
             log.debug('group name {0} has group id {1}'.format(
                 group, group_id)
             )
@@ -276,8 +284,9 @@ def get_config(name=None, group_id=None, region=None, key=None, keyid=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    sg = _get_group(conn, name, vpc_id, group_id, region, vpc_name, key,
-                    keyid, profile)
+    sg = _get_group(conn, name=name, vpc_id=vpc_id, group_id=group_id,
+                    region=region, vpc_name=vpc_name, key=key, keyid=keyid,
+                    profile=profile)
     if sg:
         ret = odict.OrderedDict()
         ret['name'] = sg.name
@@ -308,7 +317,10 @@ def create(name, description, vpc_id=None, region=None, key=None, keyid=None,
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
     if vpc_name:
-        vpc_id = __salt__['boto_vpc.check_vpc'](vpc_id, vpc_name, region, key, keyid, profile)
+        vpc_id = __salt__['boto_vpc.check_vpc'](
+            vpc_id=vpc_id, vpc_name=vpc_name, region=region, key=key,
+            keyid=keyid, profile=profile
+        )
     created = conn.create_security_group(name, description, vpc_id)
     if created:
         log.info('Created security group {0}.'.format(name))
@@ -330,8 +342,10 @@ def delete(name=None, group_id=None, region=None, key=None, keyid=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    group = _get_group(conn, name, vpc_id, group_id, region, vpc_name,
-                       key, keyid, profile)
+    group = _get_group(
+        conn, name=name, vpc_id=vpc_id, group_id=group_id, region=region,
+        vpc_name=vpc_name, key=key, keyid=keyid, profile=profile
+    )
     if group:
         deleted = conn.delete_security_group(group_id=group.id)
         if deleted:
@@ -362,8 +376,10 @@ def authorize(name=None, source_group_name=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    group = _get_group(conn, name, vpc_id, group_id, region, vpc_name,
-                       key, keyid, profile)
+    group = _get_group(
+        conn, name=name, vpc_id=vpc_id, group_id=group_id, region=region,
+        vpc_name=vpc_name, key=key, keyid=keyid, profile=profile
+    )
     if group:
         try:
             added = None
@@ -414,8 +430,10 @@ def revoke(name=None, source_group_name=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    group = _get_group(conn, name, vpc_id, group_id, region, vpc_name,
-                       key, keyid, profile)
+    group = _get_group(
+        conn, name=name, vpc_id=vpc_id, group_id=group_id, region=region,
+        vpc_name=vpc_name, key=key, keyid=keyid, profile=profile
+    )
     if group:
         try:
             revoked = None
