@@ -1,39 +1,47 @@
 # -*- coding: utf-8 -*-
 '''
-    :codeauthor: :email:`Nicole Thomas <nicole@saltstack.com>`
+Integration tests for DigitalOcean APIv2
 '''
 
 # Import Python Libs
+from __future__ import absolute_import
 import os
+import random
+import string
 
 # Import Salt Testing Libs
 from salttesting import skipIf
 from salttesting.helpers import ensure_in_syspath, expensiveTest
 
 ensure_in_syspath('../../../')
+
 # Import Salt Libs
 import integration
 from salt.config import cloud_providers_config
 
-# Import Third-Party Libs
-try:
-    import libcloud  # pylint: disable=W0611
-    HAS_LIBCLOUD = True
-except ImportError:
-    HAS_LIBCLOUD = False
-
-try:
-    import requests  # pylint: disable=W0611
-    HAS_REQUESTS = True
-except ImportError:
-    HAS_REQUESTS = False
+# Import 3rd-party libs
+from salt.ext.six.moves import range  # pylint: disable=import-error,redefined-builtin
 
 
-@skipIf(HAS_LIBCLOUD is False, 'salt-cloud requires >= libcloud 0.13.2')
-@skipIf(HAS_REQUESTS is False, 'salt-cloud requires python requests library')
+def __random_name(size=6):
+    '''
+    Generates a random cloud instance name
+    '''
+    return 'CLOUD-TEST-' + ''.join(
+        random.choice(string.ascii_uppercase + string.digits)
+        for x in range(size)
+    )
+
+# Create the cloud instance name to be used throughout the tests
+INSTANCE_NAME = __random_name()
+PROVIDER_NAME = 'digital_ocean'
+
+
+@skipIf(True, 'Valid provider configs are not available for the DigitalOcean v1 API '
+              'in conjunction with the configs needed for v2 API.')
 class DigitalOceanTest(integration.ShellCase):
     '''
-    Integration tests for the Digital Ocean cloud provider in Salt-Cloud
+    Integration tests for the DigitalOcean cloud provider in Salt-Cloud
     '''
 
     @expensiveTest
@@ -44,72 +52,134 @@ class DigitalOceanTest(integration.ShellCase):
         super(DigitalOceanTest, self).setUp()
 
         # check if appropriate cloud provider and profile files are present
-        profile_str = 'digitalocean-config:'
-        provider = 'digital_ocean'
+        profile_str = 'digitalocean-config'
         providers = self.run_cloud('--list-providers')
-        if profile_str not in providers:
+        if profile_str + ':' not in providers:
             self.skipTest(
                 'Configuration file for {0} was not found. Check {0}.conf files '
                 'in tests/integration/files/conf/cloud.*.d/ to run these tests.'
-                .format(provider)
+                .format(PROVIDER_NAME)
             )
 
-        # check if client_key and api_key are present
-        path = os.path.join(integration.FILES,
-                            'conf',
-                            'cloud.providers.d',
-                            provider + '.conf')
-        config = cloud_providers_config(path)
+        # check if personal access token, ssh_key_file, and ssh_key_names are present
+        config = cloud_providers_config(
+            os.path.join(
+                integration.FILES,
+                'conf',
+                'cloud.providers.d',
+                PROVIDER_NAME + '.conf'
+            )
+        )
 
-        api = config['digitalocean-config']['digital_ocean']['api_key']
-        client = config['digitalocean-config']['digital_ocean']['client_key']
-        ssh_file = config['digitalocean-config']['digital_ocean']['ssh_key_file']
-        ssh_name = config['digitalocean-config']['digital_ocean']['ssh_key_name']
+        personal_token = config[profile_str][PROVIDER_NAME]['personal_access_token']
+        ssh_file = config[profile_str][PROVIDER_NAME]['ssh_key_file']
+        ssh_name = config[profile_str][PROVIDER_NAME]['ssh_key_name']
 
-        if api == '' or client == '' or ssh_file == '' or ssh_name == '':
+        if personal_token == '' or ssh_file == '' or ssh_name == '':
             self.skipTest(
-                'A client key, an api key, an ssh key file, and an ssh key name '
+                'A personal access token, an ssh key file, and an ssh key name '
                 'must be provided to run these tests. Check '
                 'tests/integration/files/conf/cloud.providers.d/{0}.conf'
-                .format(provider)
+                .format(PROVIDER_NAME)
             )
+
+    def test_list_images(self):
+        '''
+        Tests the return of running the --list-images command for digital ocean
+        '''
+        image_list = self.run_cloud('--list-images {0}'.format(PROVIDER_NAME))
+        self.assertIn(
+            '14.04 x64',
+            [i.strip() for i in image_list]
+        )
+
+    def test_list_locations(self):
+        '''
+        Tests the return of running the --list-locations command for digital ocean
+        '''
+        _list_locations = self.run_cloud('--list-locations {0}'.format(PROVIDER_NAME))
+        self.assertIn(
+            'San Francisco 1',
+            [i.strip() for i in _list_locations]
+        )
+
+    def test_list_sizes(self):
+        '''
+        Tests the return of running the --list-sizes command for digital ocean
+        '''
+        _list_sizes = self.run_cloud('--list-sizes {0}'.format(PROVIDER_NAME))
+        self.assertIn(
+            '16gb',
+            [i.strip() for i in _list_sizes]
+        )
+
+    def test_key_management(self):
+        '''
+        Test key management
+        '''
+        pub = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAQQDDHr/jh2Jy4yALcK4JyWbVkPRaWmhck3IgCoeOO3z1e2dBowLh64QAM+Qb72pxekALga2oi4GvT+TlWNhzPH4V example'
+        finger_print = '3b:16:bf:e4:8b:00:8b:b8:59:8c:a9:d3:f0:19:45:fa'
+
+        _key = self.run_cloud('-f create_key {0} name="MyPubKey" public_key="{1}"'.format(PROVIDER_NAME, pub))
+
+        # Upload public key
+        self.assertIn(
+            finger_print,
+            [i.strip() for i in _key]
+        )
+
+        try:
+            # List all keys
+            list_keypairs = self.run_cloud('-f list_keypairs {0}'.format(PROVIDER_NAME))
+
+            self.assertIn(
+                finger_print,
+                [i.strip() for i in list_keypairs]
+            )
+
+            # List key
+            show_keypair = self.run_cloud('-f show_keypair {0} keyname={1}'.format(PROVIDER_NAME, 'MyPubKey'))
+
+            self.assertIn(
+                finger_print,
+                [i.strip() for i in show_keypair]
+            )
+        except AssertionError:
+            # Delete the public key if the above assertions fail
+            self.run_cloud('-f remove_key {0} id={1}'.format(PROVIDER_NAME, finger_print))
+            raise
+
+        # Delete public key
+        self.assertTrue(self.run_cloud('-f remove_key {0} id={1}'.format(PROVIDER_NAME, finger_print)))
 
     def test_instance(self):
         '''
-        Test creating an instance on Digital Ocean
+        Test creating an instance on DigitalOcean
         '''
-        name = 'digitalocean-testing'
-
-        # create the instance
-        instance = self.run_cloud('-p digitalocean-test {0}'.format(name))
-        ret_str = '        {0}'.format(name)
-
         # check if instance with salt installed returned
         try:
-            self.assertIn(ret_str, instance)
+            self.assertIn(
+                INSTANCE_NAME,
+                [i.strip() for i in self.run_cloud('-p digitalocean-test {0}'.format(INSTANCE_NAME))]
+            )
         except AssertionError:
-            self.run_cloud('-d {0} --assume-yes'.format(name))
+            self.run_cloud('-d {0} --assume-yes'.format(INSTANCE_NAME))
             raise
 
         # delete the instance
-        delete = self.run_cloud('-d {0} --assume-yes'.format(name))
-        ret_str = '            True'
         try:
-            self.assertIn(ret_str, delete)
+            self.assertIn(
+                'True',
+                [i.strip() for i in self.run_cloud('-d {0} --assume-yes'.format(INSTANCE_NAME))]
+            )
         except AssertionError:
             raise
 
-    def tearDown(self):
-        '''
-        Clean up after tests
-        '''
-        name = 'digitalocean-testing'
-        query = self.run_cloud('--query')
-        ret_str = '        {0}:'.format(name)
-
-        # if test instance is still present, delete it
-        if ret_str in query:
-            self.run_cloud('-d {0} --assume-yes'.format(name))
+        # Final clean-up of created instance, in case something went wrong.
+        # This was originally in a tearDown function, but that didn't make sense
+        # To run this for each test when not all tests create instances.
+        if INSTANCE_NAME in [i.strip() for i in self.run_cloud('--query')]:
+            self.run_cloud('-d {0} --assume-yes'.format(INSTANCE_NAME))
 
 
 if __name__ == '__main__':

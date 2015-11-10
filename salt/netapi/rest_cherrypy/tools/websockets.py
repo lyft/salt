@@ -1,4 +1,5 @@
 # encoding: utf-8
+from __future__ import absolute_import
 import cherrypy
 
 from ws4py.server.cherrypyserver import WebSocketPlugin, WebSocketTool
@@ -12,7 +13,7 @@ class SynchronizingWebsocket(WebSocket):
     '''
     Class to handle requests sent to this websocket connection.
     Each instance of this class represents a Salt websocket connection.
-    Waits to receive a ``ready`` message fom the client.
+    Waits to receive a ``ready`` message from the client.
     Calls send on it's end of the pipe to signal to the sender on receipt
     of ``ready``.
 

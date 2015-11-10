@@ -67,6 +67,19 @@ For example:
 
 .. _docs-modules:
 
+Serial Commas
+-------------
+
+According to Wikipedia: In English punctuation, a serial comma or series comma
+(also called Oxford comma and Harvard comma) is a comma placed immediately
+before the coordinating conjunction (usually and, or, or nor) in a series of
+three or more terms. For example, a list of three countries might be punctuated
+either as "France, Italy, and Spain" (with the serial comma), or as "France,
+Italy and Spain" (without the serial comma)."
+
+When writing a list that includes three or more items, the serial comma should
+always be used.
+
 Documenting modules
 ===================
 
@@ -112,7 +125,7 @@ denotes what Salt release will be affected. For example:
         '''
         Upper-case the given value
 
-        .. versionadded:: Helium
+        .. versionadded:: 2014.7.0
 
         <...snip...>
         '''
@@ -277,12 +290,32 @@ Settings
 --------
 
 Individual settings in the Salt Master or Salt Minion configuration files are
-cross-referenced using two custom roles, ``conf_master`` and ``conf_minion``.
+cross-referenced using two custom roles, ``conf_master``, and ``conf_minion``.
 
 .. code-block:: restructuredtext
 
     The :conf_minion:`minion ID <id>` setting is a unique identifier for a
     single minion.
+
+
+.. _docs-ref-fixes:
+
+Documentation Changes and Fixes
+===============================
+
+Documentation changes and fixes should be made against the earliest supported
+release branch that the update applies to. The practice of updating a release
+branch instead of making all documentation changes against Salt's main, default
+branch, ``develop``, is necessary in order for the docs to be as up-to-date as
+possible when the docs are built.
+
+The workflow mentioned above is also inline with the recommendations outlined
+in Salt's :ref:`contributing` page. You can read more about how to choose where
+to submit documentation fixes by reading the :ref:`which-salt-branch` section.
+
+For an explanation of how to submit changes against various branches, see the
+:ref:`github-pull-request` section. Specifically, see the section describing
+how to``Create a new branch`` and the steps that follow.
 
 
 .. _docs-building:

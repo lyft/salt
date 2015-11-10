@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 
-import salt.utils.decorators
+# Import Python libs
+from __future__ import absolute_import
 import time
+
+# Import Salt libs
+import salt.utils.decorators
 
 
 def _fallbackfunc():
@@ -14,6 +18,21 @@ def working_function():
 
     .. code-block:: bash
     '''
+    return True
+
+
+@salt.utils.decorators.depends(True)
+def booldependsTrue():
+    '''
+    CLI Example:
+
+    .. code-block:: bash
+    '''
+    return True
+
+
+@salt.utils.decorators.depends(False)
+def booldependsFalse():
     return True
 
 
@@ -30,7 +49,12 @@ def missing_depends():
 
 
 @salt.utils.decorators.depends('time', fallback_function=_fallbackfunc)
-def depends_will_fallback():
+def depends_will_not_fallback():
+    '''
+    CLI Example:
+
+    .. code-block:: bash
+    '''
     ret = {'ret': True,
            'time': time.time()}
     return ret

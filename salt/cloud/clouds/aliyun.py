@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 '''
 AliYun ECS Cloud Module
-==========================
+=======================
 
-.. versionadded:: Helium
+.. versionadded:: 2014.7.0
 
 The Aliyun cloud module is used to control access to the aliyun ECS.
 http://www.aliyun.com/
@@ -20,33 +20,42 @@ Set up the cloud configuration at ``/etc/salt/cloud.providers`` or
       # aliyun Access Key Secret
       key: GDE43t43REGTrkilg43934t34qT43t4dgegerGEgg
       location: cn-qingdao
-      provider: aliyun
+      driver: aliyun
 
 :depends: requests
 '''
 
 # Import python libs
+from __future__ import absolute_import
 import time
 import json
 import pprint
-import requests
 import logging
 import hmac
-import urllib
 import uuid
 import sys
 import base64
 from hashlib import sha1
 
+# Import Salt libs
+from salt.ext.six.moves.urllib.parse import quote as _quote  # pylint: disable=import-error,no-name-in-module
+
 # Import salt cloud libs
 import salt.utils.cloud
 import salt.config as config
-from salt.cloud.exceptions import (
+from salt.exceptions import (
     SaltCloudNotFound,
     SaltCloudSystemExit,
     SaltCloudExecutionFailure,
     SaltCloudExecutionTimeout
 )
+
+# Import Third Party Libs
+try:
+    import requests
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
 
 # Get logging started
 log = logging.getLogger(__name__)
@@ -62,6 +71,8 @@ DEFAULT_LOCATION = 'cn-hangzhou'
 
 DEFAULT_ALIYUN_API_VERSION = '2013-01-10'
 
+__virtualname__ = 'aliyun'
+
 
 # Only load in this module if the aliyun configurations are in place
 def __virtual__():
@@ -71,7 +82,10 @@ def __virtual__():
     if get_configured_provider() is False:
         return False
 
-    return True
+    if get_dependencies() is False:
+        return False
+
+    return __virtualname__
 
 
 def get_configured_provider():
@@ -80,8 +94,18 @@ def get_configured_provider():
     '''
     return config.is_provider_configured(
         __opts__,
-        __active_provider_name__ or 'aliyun',
+        __active_provider_name__ or __virtualname__,
         ('id', 'key')
+    )
+
+
+def get_dependencies():
+    '''
+    Warn if dependencies aren't met.
+    '''
+    return config.check_driver_dependencies(
+        __virtualname__,
+        {'requests': HAS_REQUESTS}
     )
 
 
@@ -102,7 +126,7 @@ def avail_locations(call=None):
     ret = {}
     for region in items['Regions']['Region']:
         ret[region['RegionId']] = {}
-        for item in region.keys():
+        for item in region:
             ret[region['RegionId']][item] = str(region[item])
 
     return ret
@@ -118,7 +142,7 @@ def avail_images(kwargs=None, call=None):
             '-f or --function, or with the --list-images option'
         )
 
-    if type(kwargs) is not dict:
+    if not isinstance(kwargs, dict):
         kwargs = {}
 
     provider = get_configured_provider()
@@ -133,7 +157,7 @@ def avail_images(kwargs=None, call=None):
     ret = {}
     for image in items['Images']['Image']:
         ret[image['ImageId']] = {}
-        for item in image.keys():
+        for item in image:
             ret[image['ImageId']][item] = str(image[item])
 
     return ret
@@ -155,7 +179,7 @@ def avail_sizes(call=None):
     ret = {}
     for image in items['InstanceTypes']['InstanceType']:
         ret[image['InstanceTypeId']] = {}
-        for item in image.keys():
+        for item in image:
             ret[image['InstanceTypeId']][item] = str(image[item])
 
     return ret
@@ -192,7 +216,7 @@ def list_availability_zones(call=None):
 
     for zone in items['Zones']['Zone']:
         ret[zone['ZoneId']] = {}
-        for item in zone.keys():
+        for item in zone:
             ret[zone['ZoneId']][item] = str(zone[item])
 
     return ret
@@ -225,7 +249,7 @@ def list_nodes_min(call=None):
 
     for node in nodes['InstanceStatuses']['InstanceStatus']:
         ret[node['InstanceId']] = {}
-        for item in node.keys():
+        for item in node:
             ret[node['InstanceId']][item] = node[item]
 
     return ret
@@ -299,7 +323,7 @@ def list_nodes_full(call=None):
             'size': 'TODO',
             'state': items['Status']
         }
-        for item in items.keys():
+        for item in items:
             value = items[item]
             if value is not None:
                 value = str(value)
@@ -350,7 +374,7 @@ def list_securitygroup(call=None):
     ret = {}
     for sg in result['SecurityGroups']['SecurityGroup']:
         ret[sg['SecurityGroupId']] = {}
-        for item in sg.keys():
+        for item in sg:
             ret[sg['SecurityGroupId']][item] = sg[item]
 
     return ret
@@ -368,10 +392,10 @@ def get_image(vm_):
     if not vm_image:
         raise SaltCloudNotFound('No image specified for this VM.')
 
-    if vm_image and str(vm_image) in images.keys():
+    if vm_image and str(vm_image) in images:
         return images[vm_image]['ImageId']
     raise SaltCloudNotFound(
-        'The specified image, {0!r}, could not be found.'.format(vm_image)
+        'The specified image, \'{0}\', could not be found.'.format(vm_image)
     )
 
 
@@ -387,10 +411,10 @@ def get_securitygroup(vm_):
     if not securitygroup:
         raise SaltCloudNotFound('No securitygroup ID specified for this VM.')
 
-    if securitygroup and str(securitygroup) in sgs.keys():
+    if securitygroup and str(securitygroup) in sgs:
         return sgs[securitygroup]['SecurityGroupId']
     raise SaltCloudNotFound(
-        'The specified security group, {0!r}, could not be found.'.format(
+        'The specified security group, \'{0}\', could not be found.'.format(
             securitygroup)
     )
 
@@ -407,11 +431,11 @@ def get_size(vm_):
     if not vm_size:
         raise SaltCloudNotFound('No size specified for this VM.')
 
-    if vm_size and str(vm_size) in sizes.keys():
+    if vm_size and str(vm_size) in sizes:
         return sizes[vm_size]['InstanceTypeId']
 
     raise SaltCloudNotFound(
-        'The specified size, {0!r}, could not be found.'.format(vm_size)
+        'The specified size, \'{0}\', could not be found.'.format(vm_size)
     )
 
 
@@ -427,10 +451,10 @@ def __get_location(vm_):
     if not vm_location:
         raise SaltCloudNotFound('No location specified for this VM.')
 
-    if vm_location and str(vm_location) in locations.keys():
+    if vm_location and str(vm_location) in locations:
         return locations[vm_location]['RegionId']
     raise SaltCloudNotFound(
-        'The specified location, {0!r}, could not be found.'.format(
+        'The specified location, \'{0}\', could not be found.'.format(
             vm_location
         )
     )
@@ -440,7 +464,9 @@ def start(name, call=None):
     '''
     Start a node
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt-cloud -a start myinstance
     '''
@@ -464,7 +490,9 @@ def stop(name, force=False, call=None):
     '''
     Stop a node
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt-cloud -a stop myinstance
         salt-cloud -a stop myinstance force=True
@@ -492,7 +520,9 @@ def reboot(name, call=None):
     '''
     Reboot a node
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt-cloud -a reboot myinstance
     '''
@@ -516,7 +546,7 @@ def create_node(kwargs):
     '''
     Convenience function to make the rest api call for node creation.
     '''
-    if type(kwargs) is not dict:
+    if not isinstance(kwargs, dict):
         kwargs = {}
 
     # Required parameters
@@ -549,6 +579,20 @@ def create(vm_):
     '''
     Create a single VM from a data dict
     '''
+    try:
+        # Check for required profile parameters before sending any API calls.
+        if vm_['profile'] and config.is_profile_configured(__opts__,
+                                                           __active_provider_name__ or 'aliyun',
+                                                           vm_['profile']) is False:
+            return False
+    except AttributeError:
+        pass
+
+    # Since using "provider: <provider-engine>" is deprecated, alias provider
+    # to use driver: "driver: <provider-engine>"
+    if 'provider' in vm_:
+        vm_['driver'] = vm_.pop('provider')
+
     salt.utils.cloud.fire_event(
         'event',
         'starting create',
@@ -556,7 +600,7 @@ def create(vm_):
         {
             'name': vm_['name'],
             'profile': vm_['profile'],
-            'provider': vm_['provider'],
+            'provider': vm_['driver'],
         },
         transport=__opts__['transport']
     )
@@ -586,10 +630,10 @@ def create(vm_):
             'The following exception was thrown when trying to '
             'run the initial deployment: {1}'.format(
                 vm_['name'],
-                exc.message
+                str(exc)
             ),
             # Show the traceback if the debug logging level is enabled
-            exc_info=log.isEnabledFor(logging.DEBUG)
+            exc_info_on_loglevel=logging.DEBUG
         )
         return False
 
@@ -617,19 +661,19 @@ def create(vm_):
         except SaltCloudSystemExit:
             pass
         finally:
-            raise SaltCloudSystemExit(exc.message)
+            raise SaltCloudSystemExit(str(exc))
 
     public_ip = data['PublicIpAddress'][0]
     log.debug('VM {0} is now running'.format(public_ip))
     vm_['ssh_host'] = public_ip
 
-    # The instance is booted and accessable, let's Salt it!
+    # The instance is booted and accessible, let's Salt it!
     ret = salt.utils.cloud.bootstrap(vm_, __opts__)
     ret.update(data.__dict__)
 
-    log.info('Created Cloud VM {0[name]!r}'.format(vm_))
+    log.info('Created Cloud VM \'{0[name]}\''.format(vm_))
     log.debug(
-        '{0[name]!r} VM creation details:\n{1}'.format(
+        '\'{0[name]}\' VM creation details:\n{1}'.format(
             vm_, pprint.pformat(data)
         )
     )
@@ -641,7 +685,7 @@ def create(vm_):
         {
             'name': vm_['name'],
             'profile': vm_['profile'],
-            'provider': vm_['provider'],
+            'provider': vm_['driver'],
         },
         transport=__opts__['transport']
     )
@@ -663,16 +707,16 @@ def _compute_signature(parameters, access_key_secret):
             s = line.decode().encode('utf8')
         else:
             s = line.decode(sys.stdin.encoding).encode('utf8')
-        res = urllib.quote(s, '')
+        res = _quote(s, '')
         res = res.replace('+', '%20')
         res = res.replace('*', '%2A')
         res = res.replace('%7E', '~')
         return res
 
-    sortedParameters = sorted(parameters.items(), key=lambda items: items[0])
+    sortedParameters = sorted(list(parameters.items()), key=lambda items: items[0])
 
     canonicalizedQueryString = ''
-    for (k, v) in sortedParameters:
+    for k, v in sortedParameters:
         canonicalizedQueryString += '&' + percent_encode(k) \
             + '=' + percent_encode(v)
 
@@ -718,11 +762,11 @@ def query(params=None):
     signature = _compute_signature(parameters, access_key_secret)
     parameters['Signature'] = signature
 
-    request = requests.get(path, params=parameters, verify=False)
+    request = requests.get(path, params=parameters, verify=True)
     if request.status_code != 200:
         raise SaltCloudSystemExit(
             'An error occurred while querying aliyun ECS. HTTP Code: {0}  '
-            'Error: {1!r}'.format(
+            'Error: \'{1}\''.format(
                 request.status_code,
                 request.text
             )
@@ -731,7 +775,6 @@ def query(params=None):
     log.debug(request.url)
 
     content = request.text
-    #print content
 
     result = json.loads(content, object_hook=salt.utils.decode_dict)
     if 'Code' in result:
@@ -761,7 +804,9 @@ def show_disk(name, call=None):
     '''
     Show the disk details of the instance
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt-cloud -a show_disk aliyun myinstance
     '''
@@ -779,7 +824,7 @@ def show_disk(name, call=None):
 
     for disk in items['Disks']['Disk']:
         ret[disk['DiskId']] = {}
-        for item in disk.keys():
+        for item in disk:
             ret[disk['DiskId']][item] = str(disk[item])
 
     return ret
@@ -790,7 +835,9 @@ def list_monitor_data(kwargs=None, call=None):
     Get monitor data of the instance. If instance name is
     missing, will show all the instance monitor data on the region.
 
-    CLI Examples::
+    CLI Examples:
+
+    .. code-block:: bash
 
         salt-cloud -f list_monitor_data aliyun
         salt-cloud -f list_monitor_data aliyun name=AY14051311071990225bd
@@ -800,7 +847,7 @@ def list_monitor_data(kwargs=None, call=None):
             'The list_monitor_data must be called with -f or --function.'
         )
 
-    if type(kwargs) is not dict:
+    if not isinstance(kwargs, dict):
         kwargs = {}
 
     ret = {}
@@ -817,7 +864,7 @@ def list_monitor_data(kwargs=None, call=None):
 
     for data in monitorData['InstanceMonitorData']:
         ret[data['InstanceId']] = {}
-        for item in data.keys():
+        for item in data:
             ret[data['InstanceId']][item] = str(data[item])
 
     return ret
@@ -843,8 +890,8 @@ def _get_node(name):
         except KeyError:
             attempts -= 1
             log.debug(
-                'Failed to get the data for the node {0!r}. Remaining '
-                'attempts {1}'.format(
+                'Failed to get the data for node \'{0}\'. Remaining '
+                'attempts: {1}'.format(
                     name, attempts
                 )
             )
@@ -865,7 +912,7 @@ def show_image(kwargs, call=None):
             '-f or --function'
         )
 
-    if type(kwargs) is not dict:
+    if not isinstance(kwargs, dict):
         kwargs = {}
 
     location = get_location()
@@ -892,7 +939,7 @@ def show_image(kwargs, call=None):
 
     for image in items['Images']['Image']:
         ret[image['ImageId']] = {}
-        for item in image.keys():
+        for item in image:
             ret[image['ImageId']][item] = str(image[item])
 
     return ret

@@ -64,6 +64,10 @@ start() {
         fi
     else
         daemon --check $SERVICE $SALTMASTER -d $MASTER_ARGS
+        RETVAL=$?
+        [ $RETVAL -eq 0 ] && touch /var/lock/subsys/$SERVICE
+        echo
+        return $RETVAL
     fi
     RETVAL=$?
     echo
@@ -86,6 +90,10 @@ stop() {
         fi
     else
         killproc $PROCESS
+        RETVAL=$?
+        echo
+        [ $RETVAL -eq 0 ] && rm -f /var/lock/subsys/$SERVICE
+        return $RETVAL
     fi
     RETVAL=$?
     echo
@@ -124,7 +132,7 @@ case "$1" in
         ;;
     reload)
         echo "can't reload configuration, you have to restart it"
-        RETVAL=$?
+        RETVAL=1
         ;;
     *)
         echo $"Usage: $0 {start|stop|status|restart|condrestart|reload}"

@@ -2,18 +2,28 @@
 '''
 Support for the Mercurial SCM
 '''
+from __future__ import absolute_import
+import logging
 
 # Import salt libs
 from salt import utils
 
-if utils.is_windows():
-    hg_binary = "hg.exe"
-else:
-    hg_binary = "hg"
+log = logging.getLogger(__name__)
 
 
-def _check_hg():
-    utils.check_or_die(hg_binary)
+def __virtual__():
+    '''
+    Only load if hg is installed
+    '''
+    if utils.which('hg') is None:
+        return (False,
+                'The hg execution module cannot be loaded: hg unavailable.')
+    else:
+        return True
+
+
+def _ssh_flag(identity_path):
+    return '--ssh "ssh -i {0}"'.format(identity_path)
 
 
 def revision(cwd, rev='tip', short=False, user=None):
@@ -38,13 +48,19 @@ def revision(cwd, rev='tip', short=False, user=None):
 
         salt '*' hg.revision /path/to/repo mybranch
     '''
-    _check_hg()
+    cmd = [
+            'hg',
+            'id',
+            '-i',
+            '--debug' if not short else '',
+            '-r',
+            '{0}'.format(rev)]
 
-    cmd = 'hg id -i{short} {rev}'.format(
-        short=' --debug' if not short else '',
-        rev=' -r {0}'.format(rev))
-
-    result = __salt__['cmd.run_all'](cmd, cwd=cwd, runas=user)
+    result = __salt__['cmd.run_all'](
+            cmd,
+            cwd=cwd,
+            runas=user,
+            python_shell=False)
 
     if result['retcode'] == 0:
         return result['stdout']
@@ -54,7 +70,7 @@ def revision(cwd, rev='tip', short=False, user=None):
 
 def describe(cwd, rev='tip', user=None):
     '''
-    Mimick git describe and return an identifier for the given revision
+    Mimic git describe and return an identifier for the given revision
 
     cwd
         The path to the Mercurial repository
@@ -71,11 +87,19 @@ def describe(cwd, rev='tip', user=None):
 
         salt '*' hg.describe /path/to/repo
     '''
-    _check_hg()
-
-    cmd = "hg log -r {0} --template"\
-            " '{{latesttag}}-{{latesttagdistance}}-{{node|short}}'".format(rev)
-    desc = __salt__['cmd.run_stdout'](cmd, cwd=cwd, runas=user)
+    cmd = [
+            'hg',
+            'log',
+            '-r',
+            '{0}'.format(rev),
+            '--template',
+            "'{{latesttag}}-{{latesttagdistance}}-{{node|short}}'"
+            ]
+    desc = __salt__['cmd.run_stdout'](
+            cmd,
+            cwd=cwd,
+            runas=user,
+            python_shell=False)
 
     return desc or revision(cwd, rev, short=True)
 
@@ -112,23 +136,31 @@ def archive(cwd, output, rev='tip', fmt=None, prefix=None, user=None):
 
         salt '*' hg.archive /path/to/repo output=/tmp/archive.tgz fmt=tgz
     '''
-    _check_hg()
+    cmd = [
+            'hg',
+            'archive',
+            '{0}'.format(output),
+            '--rev',
+            '{0}'.format(rev),
+            ]
+    if fmt:
+        cmd.append('--type')
+        cmd.append('{0}'.format(fmt))
+    if prefix:
+        cmd.append('--prefix')
+        cmd.append('"{0}"'.format(prefix))
+    return __salt__['cmd.run'](cmd, cwd=cwd, runas=user, python_shell=False)
 
-    cmd = 'hg archive {output}{rev}{fmt}'.format(
-        rev=' --rev {0}'.format(rev),
-        output=output,
-        fmt=' --type {0}'.format(fmt) if fmt else '',
-        prefix=' --prefix "{0}"'.format(prefix if prefix else ''))
 
-    return __salt__['cmd.run'](cmd, cwd=cwd, runas=user)
-
-
-def pull(cwd, opts=None, user=None):
+def pull(cwd, opts=None, user=None, identity=None, repository=None):
     '''
     Perform a pull on the given repository
 
     cwd
         The path to the Mercurial repository
+
+    repository : None
+        Perform pull from the repository different from .hg/hgrc:[paths]:default
 
     opts : None
         Any additional options to add to the command line
@@ -136,17 +168,26 @@ def pull(cwd, opts=None, user=None):
     user : None
         Run hg as a user other than what the minion runs as
 
+    identity : None
+        Private SSH key on the minion server for authentication (ssh://)
+
+        .. versionadded:: 2015.5.0
+
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' hg.pull /path/to/repo opts=-u
     '''
-    _check_hg()
-
-    if not opts:
-        opts = ''
-    return __salt__['cmd.run']('hg pull {0}'.format(opts), cwd=cwd, runas=user)
+    cmd = ['hg', 'pull']
+    if identity:
+        cmd.append(_ssh_flag(identity))
+    if opts:
+        for opt in opts.split():
+            cmd.append(opt)
+    if repository is not None:
+        cmd.append(repository)
+    return __salt__['cmd.run'](cmd, cwd=cwd, runas=user, python_shell=False, use_vt=not utils.is_windows())
 
 
 def update(cwd, rev, force=False, user=None):
@@ -171,13 +212,13 @@ def update(cwd, rev, force=False, user=None):
 
         salt devserver1 hg.update /path/to/repo somebranch
     '''
-    _check_hg()
+    cmd = ['hg', 'update', '{0}'.format(rev)]
+    if force:
+        cmd.append('-C')
+    return __salt__['cmd.run'](cmd, cwd=cwd, runas=user, python_shell=False)
 
-    cmd = 'hg update {0}{1}'.format(rev, ' -C' if force else '')
-    return __salt__['cmd.run'](cmd, cwd=cwd, runas=user)
 
-
-def clone(cwd, repository, opts=None, user=None):
+def clone(cwd, repository, opts=None, user=None, identity=None):
     '''
     Clone a new repository
 
@@ -193,15 +234,64 @@ def clone(cwd, repository, opts=None, user=None):
     user : None
         Run hg as a user other than what the minion runs as
 
+    identity : None
+        Private SSH key on the minion server for authentication (ssh://)
+
+        .. versionadded:: 2015.5.0
+
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' hg.clone /path/to/repo https://bitbucket.org/birkenfeld/sphinx
     '''
-    _check_hg()
+    cmd = ['hg', 'clone', '{0}'.format(repository), '{0}'.format(cwd)]
+    if opts:
+        for opt in opts.split():
+            cmd.append('{0}'.format(opt))
+    if identity:
+        cmd.append(_ssh_flag(identity))
+    return __salt__['cmd.run'](cmd, runas=user, python_shell=False, use_vt=not utils.is_windows())
 
-    if not opts:
-        opts = ''
-    cmd = 'hg clone {0} {1} {2}'.format(repository, cwd, opts)
-    return __salt__['cmd.run'](cmd, runas=user)
+
+def status(cwd, opts=None, user=None):
+    '''
+    Show changed files of the given repository
+
+    cwd
+        The path to the Mercurial repository
+
+    opts : None
+        Any additional options to add to the command line
+
+    user : None
+        Run hg as a user other than what the minion runs as
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' hg.status /path/to/repo
+    '''
+    cmd = ['hg', 'status']
+    if opts:
+        for opt in opts.split():
+            cmd.append('{0}'.format(opt))
+    out = __salt__['cmd.run'](cmd, cwd=cwd, runas=user, python_shell=False)
+    types = {
+        'M': 'modified',
+        'A': 'added',
+        'R': 'removed',
+        'C': 'clean',
+        '!': 'missing',
+        '?': 'not tracked',
+        'I': 'ignored',
+        ' ': 'origin of the previous file',
+    }
+    ret = {}
+    for line in out.splitlines():
+        t, f = types[line[0]], line[2:]
+        if t not in ret:
+            ret[t] = []
+        ret[t].append(f)
+    return ret

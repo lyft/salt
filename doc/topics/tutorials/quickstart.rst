@@ -3,7 +3,7 @@ Salt Masterless Quickstart
 ==========================
 
 .. _`Vagrant`: http://www.vagrantup.com/
-.. _`salty-vagrant`: https://github.com/saltstack/salty-vagrant
+.. _`Vagrant salt provisioner`: http://docs.vagrantup.com/v2/provisioning/salt.html
 .. _`salt-bootstrap`: https://github.com/saltstack/salt-bootstrap
 
 Running a masterless salt-minion lets you use Salt's configuration management
@@ -29,19 +29,21 @@ for any OS with a Bourne shell:
 
 .. code-block:: bash
 
-    wget -O - https://bootstrap.saltstack.com | sudo sh
+    curl -L https://bootstrap.saltstack.com -o install_salt.sh
+    sudo sh install_salt.sh
+
 
 See the `salt-bootstrap`_ documentation for other one liners. When using `Vagrant`_
-to test out salt, the `salty-vagrant`_ tool will  provision the VM for you.
+to test out salt, the `Vagrant salt provisioner`_ will provision the VM for you.
 
 Telling Salt to Run Masterless
 ===================================
 
-To instruct the minion to not look for a master when running
-the :conf_minion:`file_client` configuration option needs to be set.
+To instruct the minion to not look for a master, the :conf_minion:`file_client`
+configuration option needs to be set in the minion configuration file.
 By default the :conf_minion:`file_client` is set to ``remote`` so that the
-minion knows that file server and pillar data are to be gathered from the
-master. When setting the :conf_minion:`file_client` option to ``local`` the
+minion gathers file server and pillar data from the salt master.
+When setting the :conf_minion:`file_client` option to ``local`` the
 minion is configured to not gather this data from the master.
 
 .. code-block:: yaml
@@ -51,6 +53,11 @@ minion is configured to not gather this data from the master.
 Now the salt minion will not look for a master and will assume that the local
 system has all of the file and pillar resources.
 
+.. note::
+
+    When running Salt in masterless mode, do not run the salt-minion daemon.
+    Otherwise, it will attempt to connect to a master and fail. The salt-call
+    command stands on its own and does not need the salt-minion daemon.
 
 Create State Tree
 =================
@@ -62,7 +69,7 @@ minion are stored.
 The following example walks through the steps necessary to create a state tree that
 ensures that the server has the Apache webserver installed.
 
-.. note:::
+.. note::
     For a complete explanation on Salt States, see the `tutorial
     <http://docs.saltstack.org/en/latest/topics/tutorials/states_pt1.html>`_.
 
@@ -85,6 +92,12 @@ ensures that the server has the Apache webserver installed.
     apache:               # ID declaration
       pkg:                # state declaration
         - installed       # function declaration
+
+.. note::
+
+    The apache package has different names on different platforms, for
+    instance on Debian/Ubuntu it is apache2, on Fedora/RHEL it is httpd
+    and on Arch it is apache
 
 The only thing left is to provision our minion using salt-call and the
 highstate command.

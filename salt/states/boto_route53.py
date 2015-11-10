@@ -1,75 +1,81 @@
 # -*- coding: utf-8 -*-
 '''
 Manage Route53 records
-======================
 
-.. versionadded:: Helium
+.. versionadded:: 2014.7.0
 
 Create and delete Route53 records. Be aware that this interacts with Amazon's
 services, and so may incur charges.
 
-This module uses boto, which can be installed via package, or pip.
+This module uses ``boto``, which can be installed via package, or pip.
 
 This module accepts explicit route53 credentials but can also utilize
-IAM roles assigned to the instance trough Instance Profiles. Dynamic
+IAM roles assigned to the instance through Instance Profiles. Dynamic
 credentials are then automatically obtained from AWS API and no further
-configuration is necessary. More Information available at:
+configuration is necessary. More information available `here
+<http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html>`_.
 
-http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/iam-roles-for-amazon-ec2.html
+If IAM roles are not used you need to specify them either in a pillar file or
+in the minion's config file:
 
-If IAM roles are not used you need to specify them either in a pillar or
-in the minion's config file::
+.. code-block:: yaml
 
     route53.keyid: GKTADJGHEIQSXMKKRBJ08H
     route53.key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 
-It's also possible to specify key, keyid and region via a profile, either
-as a passed in dict, or as a string to pull from pillars or minion config:
+It's also possible to specify ``key``, ``keyid`` and ``region`` via a profile, either
+passed in as a dict, or as a string to pull from pillars or minion config:
 
 .. code-block:: yaml
 
     myprofile:
-        keyid: GKTADJGHEIQSXMKKRBJ08H
-        key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
-            region: us-east-1
+      keyid: GKTADJGHEIQSXMKKRBJ08H
+      key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+      region: us-east-1
 
 .. code-block:: yaml
 
     mycnamerecord:
-        boto_route53.present:
-            - name: test.example.com.
-            - value: my-elb.us-east-1.elb.amazonaws.com.
-            - zone: example.com.
-            - ttl: 60
-            - record_type: CNAME
-            - region: us-east-1
-            - keyid: GKTADJGHEIQSXMKKRBJ08H
-            - key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+      boto_route53.present:
+        - name: test.example.com.
+        - value: my-elb.us-east-1.elb.amazonaws.com.
+        - zone: example.com.
+        - ttl: 60
+        - record_type: CNAME
+        - region: us-east-1
+        - keyid: GKTADJGHEIQSXMKKRBJ08H
+        - key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 
     # Using a profile from pillars
     myarecord:
-        boto_route53.present:
-            - name: test.example.com.
-            - value: 1.1.1.1
-            - zone: example.com.
-            - ttl: 60
-            - record_type: A
-            - region: us-east-1
-            - profile: myprofile
+      boto_route53.present:
+        - name: test.example.com.
+        - value: 1.1.1.1
+        - zone: example.com.
+        - ttl: 60
+        - record_type: A
+        - region: us-east-1
+        - profile: myprofile
 
     # Passing in a profile
     myarecord:
-        boto_route53.present:
-            - name: test.example.com.
-            - value: 1.1.1.1
-            - zone: example.com.
-            - ttl: 60
-            - record_type: A
-            - region: us-east-1
-            - profile:
-                keyid: GKTADJGHEIQSXMKKRBJ08H
-                key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+      boto_route53.present:
+        - name: test.example.com.
+        - value: 1.1.1.1
+        - zone: example.com.
+        - ttl: 60
+        - record_type: A
+        - region: us-east-1
+        - profile:
+            keyid: GKTADJGHEIQSXMKKRBJ08H
+            key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
 '''
+
+# Import Python Libs
+from __future__ import absolute_import
+
+# Import Salt Libs
+from salt.utils import SaltInvocationError
 
 
 def __virtual__():
@@ -89,7 +95,10 @@ def present(
         region=None,
         key=None,
         keyid=None,
-        profile=None):
+        profile=None,
+        wait_for_sync=True,
+        split_dns=False,
+        private_zone=False):
     '''
     Ensure the Route53 record is present.
 
@@ -103,7 +112,7 @@ def present(
         The zone to create the record in.
 
     record_type
-        The record type. Currently supported values: A, CNAME, MX
+        The record type (A, NS, MX, TXT, etc.)
 
     ttl
         The time to live for the record.
@@ -123,23 +132,45 @@ def present(
     profile
         A dict with region, key and keyid, or a pillar key (string)
         that contains a dict with region, key and keyid.
-    '''
-    ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
 
-    record = __salt__['boto_route53.get_record'](name, zone, record_type,
-                                                 False, region, key, keyid,
-                                                 profile)
+    wait_for_sync
+        Wait for an INSYNC change status from Route53.
+
+    split_dns
+        Route53 supports a public and private DNS zone with the same
+        names.
+
+    private_zone
+        If using split_dns, specify if this is the private zone.
+    '''
+    ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
+
+    # If a list is passed in for value, change it to a comma-separated string
+    # So it will work with subsequent boto module calls and string functions
+    if isinstance(value, list):
+        value = ','.join(value)
+
+    try:
+        record = __salt__['boto_route53.get_record'](name, zone, record_type,
+                                                     False, region, key, keyid,
+                                                     profile, split_dns,
+                                                     private_zone)
+    except SaltInvocationError as err:
+        ret['comment'] = 'Error: {0}'.format(err)
+        ret['result'] = False
+        return ret
 
     if isinstance(record, dict) and not record:
         if __opts__['test']:
             ret['comment'] = 'Route53 record {0} set to be added.'.format(name)
+            ret['result'] = None
             return ret
         added = __salt__['boto_route53.add_record'](name, value, zone,
                                                     record_type, identifier,
                                                     ttl, region, key, keyid,
-                                                    profile)
+                                                    profile, wait_for_sync,
+                                                    split_dns, private_zone)
         if added:
-            ret['result'] = True
             ret['changes']['old'] = None
             ret['changes']['new'] = {'name': name,
                                      'value': value,
@@ -171,14 +202,17 @@ def present(
             if __opts__['test']:
                 msg = 'Route53 record {0} set to be updated.'.format(name)
                 ret['comment'] = msg
+                ret['result'] = None
                 return ret
             updated = __salt__['boto_route53.update_record'](name, value, zone,
                                                              record_type,
                                                              identifier, ttl,
                                                              region, key,
-                                                             keyid, profile)
+                                                             keyid, profile,
+                                                             wait_for_sync,
+                                                             split_dns,
+                                                             private_zone)
             if updated:
-                ret['result'] = True
                 ret['changes']['old'] = record
                 ret['changes']['new'] = {'name': name,
                                          'value': value,
@@ -202,7 +236,10 @@ def absent(
         region=None,
         key=None,
         keyid=None,
-        profile=None):
+        profile=None,
+        wait_for_sync=True,
+        split_dns=False,
+        private_zone=False):
     '''
     Ensure the Route53 record is deleted.
 
@@ -211,6 +248,9 @@ def absent(
 
     zone
         The zone to delete the record from.
+
+    record_type
+        The record type (A, NS, MX, TXT, etc.)
 
     identifier
         An identifier to match for deletion.
@@ -227,24 +267,38 @@ def absent(
     profile
         A dict with region, key and keyid, or a pillar key (string)
         that contains a dict with region, key and keyid.
+
+    wait_for_sync
+        Wait for an INSYNC change status from Route53.
+
+    split_dns
+        Route53 supports a public and private DNS zone with the same
+        names.
+
+    private_zone
+        If using split_dns, specify if this is the private zone.
     '''
-    ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
+    ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
 
     record = __salt__['boto_route53.get_record'](name, zone, record_type,
                                                  False, region, key, keyid,
-                                                 profile)
+                                                 profile, split_dns,
+                                                 private_zone)
     if record:
         if __opts__['test']:
             msg = 'Route53 record {0} set to be deleted.'.format(name)
             ret['comment'] = msg
+            ret['result'] = None
             return ret
         deleted = __salt__['boto_route53.delete_record'](name, zone,
                                                          record_type,
                                                          identifier, False,
                                                          region, key, keyid,
-                                                         profile)
+                                                         profile,
+                                                         wait_for_sync,
+                                                         split_dns,
+                                                         private_zone)
         if deleted:
-            ret['result'] = True
             ret['changes']['old'] = record
             ret['changes']['new'] = None
             ret['comment'] = 'Deleted {0} Route53 record.'.format(name)

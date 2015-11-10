@@ -2,9 +2,16 @@
 '''
 Manage a glusterfs pool
 '''
+from __future__ import absolute_import
 
 # Import python libs
 import logging
+
+# Import 3rd-party libs
+# pylint: disable=import-error,redefined-builtin
+from salt.ext.six.moves import range
+from salt.ext.six.moves import shlex_quote as _cmd_quote
+# pylint: enable=import-error,redefined-builtin
 
 # Import salt libs
 import salt.utils
@@ -19,7 +26,7 @@ def __virtual__():
     '''
     if salt.utils.which('gluster'):
         return True
-    return False
+    return (False, 'glusterfs server is not installed')
 
 
 def list_peers():
@@ -31,9 +38,28 @@ def list_peers():
     .. code-block:: bash
 
         salt '*' glusterfs.list_peers
+
+    GLUSTER direct CLI example (to show what salt is sending to gluster):
+
+        $ gluster peer status
+
+    GLUSTER CLI 3.4.4 return example (so we know what we are parsing):
+
+        Number of Peers: 2
+
+        Hostname: ftp2
+        Port: 24007
+        Uuid: cbcb256b-e66e-4ec7-a718-21082d396c24
+        State: Peer in Cluster (Connected)
+
+        Hostname: ftp3
+        Uuid: 5ea10457-6cb2-427b-a770-7897509625e9
+        State: Peer in Cluster (Connected)
+
+
     '''
     get_peer_list = 'gluster peer status | awk \'/Hostname/ {print $2}\''
-    result = __salt__['cmd.run'](get_peer_list)
+    result = __salt__['cmd.run'](get_peer_list, python_shell=True)
     if 'No peers present' in result:
         return None
     else:
@@ -52,6 +78,23 @@ def peer(name):
     .. code-block:: bash
 
         salt 'one.gluster.*' glusterfs.peer two
+
+    GLUSTER direct CLI example (to show what salt is sending to gluster):
+
+        $ gluster peer probe ftp2
+
+    GLUSTER CLI 3.4.4 return example (so we know what we are parsing):
+        #if the "peer" is the local host:
+        peer probe: success: on localhost not needed
+
+        #if the peer was just added:
+        peer probe: success
+
+        #if the peer was already part of the cluster:
+        peer probe: success: host ftp2 port 24007 already in peer list
+
+
+
     '''
     if suc.check_name(name, 'a-zA-Z0-9._-'):
         return 'Invalid characters in peer name'
@@ -61,7 +104,7 @@ def peer(name):
 
 
 def create(name, bricks, stripe=False, replica=False, device_vg=False,
-           transport='tcp', start=False):
+           transport='tcp', start=False, force=False):
     '''
     Create a glusterfs volume.
 
@@ -91,6 +134,9 @@ def create(name, bricks, stripe=False, replica=False, device_vg=False,
 
     start
         Start the volume after creation
+
+    force
+        Force volume creation, this works even if creating in root FS
 
     CLI Example:
 
@@ -130,6 +176,8 @@ def create(name, bricks, stripe=False, replica=False, device_vg=False,
     if transport != 'tcp':
         cmd += 'transport {0} '.format(transport)
     cmd += ' '.join(bricks)
+    if force:
+        cmd += ' force'
 
     log.debug('Clustering command:\n{0}'.format(cmd))
     ret = __salt__['cmd.run'](cmd)
@@ -159,7 +207,7 @@ def list_volumes():
 
     results = __salt__['cmd.run']('gluster volume list').splitlines()
     if results[0] == 'No volumes present in cluster':
-        return None
+        return []
     else:
         return results
 
@@ -279,8 +327,8 @@ def stop_volume(name):
     '''
     vol_status = status(name)
     if isinstance(vol_status, dict):
-        cmd = 'yes | gluster volume stop {0}'.format(name)
-        result = __salt__['cmd.run'](cmd)
+        cmd = 'yes | gluster volume stop {0}'.format(_cmd_quote(name))
+        result = __salt__['cmd.run'](cmd, python_shell=True)
         if result.splitlines()[0].endswith('success'):
             return 'Volume {0} stopped'.format(name)
         else:
@@ -301,7 +349,7 @@ def delete(target, stop=True):
     if target not in list_volumes():
         return 'Volume does not exist'
 
-    cmd = 'yes | gluster volume delete {0}'.format(target)
+    cmd = 'yes | gluster volume delete {0}'.format(_cmd_quote(target))
 
     # Stop volume if requested to and it is running
     if stop is True and isinstance(status(target), dict):
@@ -313,7 +361,7 @@ def delete(target, stop=True):
         if isinstance(status(target), dict):
             return 'Error: Volume must be stopped before deletion'
 
-    result = __salt__['cmd.run'](cmd)
+    result = __salt__['cmd.run'](cmd, python_shell=True)
     if result.splitlines()[0].endswith('success'):
         if stopped:
             return 'Volume {0} stopped and deleted'.format(target)
@@ -321,3 +369,50 @@ def delete(target, stop=True):
             return 'Volume {0} deleted'.format(target)
     else:
         return result
+
+
+def add_volume_bricks(name, bricks):
+    '''
+    Add brick(s) to an existing volume
+
+    name
+        Volume name
+
+    bricks
+        List of bricks to add to the volume
+    '''
+
+    new_bricks = []
+
+    cmd = 'echo yes | gluster volume add-brick {0}'.format(name)
+
+    if isinstance(bricks, str):
+        bricks = [bricks]
+
+    volume_bricks = status(name)
+
+    if 'does not exist' in volume_bricks:
+        return volume_bricks
+
+    if 'is not started' in volume_bricks:
+        return volume_bricks
+
+    for brick in bricks:
+        if brick in volume_bricks['bricks']:
+            log.debug('Brick {0} already in volume {1}...excluding from command'.format(brick, name))
+        else:
+            new_bricks.append(brick)
+
+    if len(new_bricks) > 0:
+        for brick in new_bricks:
+            cmd += ' '+str(brick)
+
+        result = __salt__['cmd.run'](cmd)
+
+        if result.endswith('success'):
+            return '{0} bricks successfully added to the volume {1}'.format(len(new_bricks), name)
+        else:
+            return result
+
+    else:
+        return 'Bricks already in volume {0}'.format(name)

@@ -2,13 +2,13 @@
 '''
 The main entry point for salt-api
 '''
+from __future__ import absolute_import
 # Import python libs
 import logging
-import multiprocessing
-import signal
 
 # Import salt-api libs
 import salt.loader
+import salt.utils.process
 
 logger = logging.getLogger(__name__)
 
@@ -19,27 +19,19 @@ class NetapiClient(object):
     '''
     def __init__(self, opts):
         self.opts = opts
-        self.processes = []
+        self.process_manager = salt.utils.process.ProcessManager()
+        self.netapi = salt.loader.netapi(self.opts)
 
     def run(self):
         '''
         Load and start all available api modules
         '''
-        netapi = salt.loader.netapi(self.opts)
-        for fun in netapi:
+        if not len(self.netapi):
+            logger.error("Did not find any netapi configurations, nothing to start")
+
+        for fun in self.netapi:
             if fun.endswith('.start'):
-                logger.info("Starting '{0}' api module".format(fun))
-                p = multiprocessing.Process(target=netapi[fun])
-                p.start()
-                self.processes.append(p)
+                logger.info('Starting {0} netapi module'.format(fun))
+                self.process_manager.add_process(self.netapi[fun])
 
-        # make sure to kill the subprocesses if the parent is killed
-        signal.signal(signal.SIGTERM, self.kill_children)
-
-    def kill_children(self, *args):
-        '''
-        Kill all of the children
-        '''
-        for p in self.processes:
-            p.terminate()
-            p.join()
+        self.process_manager.run()

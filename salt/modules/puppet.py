@@ -4,14 +4,18 @@ Execute puppet routines
 '''
 
 # Import python libs
+from __future__ import absolute_import
 import logging
 import os
-import yaml
 import datetime
 
 # Import salt libs
 import salt.utils
 from salt.exceptions import CommandExecutionError
+
+# Import 3rd-party libs
+import yaml
+import salt.ext.six as six
 
 log = logging.getLogger(__name__)
 
@@ -20,26 +24,14 @@ def __virtual__():
     '''
     Only load if puppet is installed
     '''
-    if salt.utils.which('facter'):
+    unavailable_exes = ', '.join(exe for exe in ('facter', 'puppet')
+                                 if salt.utils.which(exe) is None)
+    if unavailable_exes:
+        return (False,
+                ('The puppet execution module cannot be loaded: '
+                 '{0} unavailable.'.format(unavailable_exes)))
+    else:
         return 'puppet'
-    return False
-
-
-def _check_puppet():
-    '''
-    Checks if puppet is installed
-    '''
-    # I thought about making this a virtual module, but then I realized that I
-    # would require the minion to restart if puppet was installed after the
-    # minion was started, and that would be rubbish
-    salt.utils.check_or_die('puppet')
-
-
-def _check_facter():
-    '''
-    Checks if facter is installed
-    '''
-    salt.utils.check_or_die('facter')
 
 
 def _format_fact(output):
@@ -63,10 +55,10 @@ class _Puppet(object):
         the default locations.
         '''
         self.subcmd = 'agent'
-        self.subcmd_args = []  # eg. /a/b/manifest.pp
+        self.subcmd_args = []  # e.g. /a/b/manifest.pp
 
-        self.kwargs = {'color': 'false'}       # eg. --tags=apache::server
-        self.args = []         # eg. --noop
+        self.kwargs = {'color': 'false'}       # e.g. --tags=apache::server
+        self.args = []         # e.g. --noop
 
         if salt.utils.is_windows():
             self.vardir = 'C:\\ProgramData\\PuppetLabs\\puppet\\var'
@@ -91,7 +83,6 @@ class _Puppet(object):
         '''
         Format the command string to executed using cmd.run_all.
         '''
-
         cmd = 'puppet {subcmd} --vardir {vardir} --confdir {confdir}'.format(
             **self.__dict__
         )
@@ -101,7 +92,7 @@ class _Puppet(object):
             [' --{0}'.format(k) for k in self.args]  # single spaces
         )
         args += ''.join([
-            ' --{0} {1}'.format(k, v) for k, v in self.kwargs.items()]
+            ' --{0} {1}'.format(k, v) for k, v in six.iteritems(self.kwargs)]
         )
 
         return '{0} {1}'.format(cmd, args)
@@ -124,8 +115,7 @@ class _Puppet(object):
         if self.subcmd == 'agent':
             # no arguments are required
             args.extend([
-                'onetime', 'verbose', 'ignorecache', 'no-daemonize',
-                'no-usecacheonfailure', 'no-splay', 'show_diff'
+                'test'
             ])
 
         # finally do this after subcmd has been matched for all remaining args
@@ -137,7 +127,7 @@ def run(*args, **kwargs):
     Execute a puppet run and return a dict with the stderr, stdout,
     return code, etc. The first positional argument given is checked as a
     subcommand. Following positional arguments should be ordered with arguments
-    required by the subcommand first, followed by non-keyvalue pair options.
+    required by the subcommand first, followed by non-keyword arguments.
     Tags are specified by a tag keyword and comma separated list of values. --
     http://docs.puppetlabs.com/puppet/latest/reference/lang_tags.html
 
@@ -151,7 +141,6 @@ def run(*args, **kwargs):
         salt '*' puppet.run debug
         salt '*' puppet.run apply /a/b/manifest.pp modulepath=/a/b/modules tags=basefiles::edit,apache::server
     '''
-    _check_puppet()
     puppet = _Puppet()
 
     if args:
@@ -167,7 +156,13 @@ def run(*args, **kwargs):
 
     puppet.kwargs.update(salt.utils.clean_kwargs(**kwargs))
 
-    return __salt__['cmd.run_all'](repr(puppet))
+    ret = __salt__['cmd.run_all'](repr(puppet), python_shell=False)
+    if ret['retcode'] in [0, 2]:
+        ret['retcode'] = 0
+    else:
+        ret['retcode'] = 1
+
+    return ret
 
 
 def noop(*args, **kwargs):
@@ -190,7 +185,7 @@ def noop(*args, **kwargs):
 
 def enable():
     '''
-    .. versionadded:: Helium
+    .. versionadded:: 2014.7.0
 
     Enable the puppet agent
 
@@ -198,10 +193,8 @@ def enable():
 
     .. code-block:: bash
 
-        salt '*' puppet.disable
+        salt '*' puppet.enable
     '''
-
-    _check_puppet()
     puppet = _Puppet()
 
     if os.path.isfile(puppet.disabled_lockfile):
@@ -216,20 +209,25 @@ def enable():
     return False
 
 
-def disable():
+def disable(message=None):
     '''
-    .. versionadded:: Helium
+    .. versionadded:: 2014.7.0
 
     Disable the puppet agent
+
+    message
+        .. versionadded:: 2015.5.2
+
+        Disable message to send to puppet
 
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' puppet.disable
+        salt '*' puppet.disable 'Disabled, contact XYZ before enabling'
     '''
 
-    _check_puppet()
     puppet = _Puppet()
 
     if os.path.isfile(puppet.disabled_lockfile):
@@ -238,7 +236,8 @@ def disable():
         with salt.utils.fopen(puppet.disabled_lockfile, 'w') as lockfile:
             try:
                 # Puppet chokes when no valid json is found
-                lockfile.write('{}')
+                str = '{{"disabled_message":"{0}"}}'.format(message) if message is not None else '{}'
+                lockfile.write(str)
                 lockfile.close()
                 return True
             except (IOError, OSError) as exc:
@@ -249,7 +248,7 @@ def disable():
 
 def status():
     '''
-    .. versionadded:: Helium
+    .. versionadded:: 2014.7.0
 
     Display puppet agent status
 
@@ -259,7 +258,6 @@ def status():
 
         salt '*' puppet.status
     '''
-    _check_puppet()
     puppet = _Puppet()
 
     if os.path.isfile(puppet.disabled_lockfile):
@@ -290,7 +288,7 @@ def status():
 
 def summary():
     '''
-    .. versionadded:: Helium
+    .. versionadded:: 2014.7.0
 
     Show a summary of the last puppet agent run
 
@@ -301,7 +299,6 @@ def summary():
         salt '*' puppet.summary
     '''
 
-    _check_puppet()
     puppet = _Puppet()
 
     try:
@@ -336,6 +333,22 @@ def summary():
     return result
 
 
+def plugin_sync():
+    '''
+    Runs a plugin synch between the puppet master and agent
+
+    CLI Example:
+    .. code-block:: bash
+
+        salt '*' puppet.plugin_sync
+    '''
+    ret = __salt__['cmd.run']('puppet plugin download')
+
+    if not ret:
+        return ''
+    return ret
+
+
 def facts(puppet=False):
     '''
     Run facter and return the results
@@ -346,8 +359,6 @@ def facts(puppet=False):
 
         salt '*' puppet.facts
     '''
-    _check_facter()
-
     ret = {}
     opt_puppet = '--puppet' if puppet else ''
     output = __salt__['cmd.run']('facter {0}'.format(opt_puppet))
@@ -375,10 +386,10 @@ def fact(name, puppet=False):
 
         salt '*' puppet.fact kernel
     '''
-    _check_facter()
-
     opt_puppet = '--puppet' if puppet else ''
-    ret = __salt__['cmd.run']('facter {0} {1}'.format(opt_puppet, name))
+    ret = __salt__['cmd.run'](
+            'facter {0} {1}'.format(opt_puppet, name),
+            python_shell=False)
     if not ret:
         return ''
     return ret

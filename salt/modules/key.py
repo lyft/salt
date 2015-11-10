@@ -2,6 +2,7 @@
 '''
 Functions to view the minion's public key information
 '''
+from __future__ import absolute_import
 
 # Import python libs
 import os
@@ -15,7 +16,6 @@ def finger():
     Return the minion's public key fingerprint
 
     CLI Example:
-    dfasdf
 
     .. code-block:: bash
 

@@ -4,7 +4,7 @@
 Configuring the Salt Minion
 ===========================
 
-The Salt system is amazingly simple and easy to configure, the two components
+The Salt system is amazingly simple and easy to configure. The two components
 of the Salt system each have a respective configuration file. The
 :command:`salt-master` is configured via the master configuration file, and the
 :command:`salt-minion` is configured via the minion configuration file.
@@ -12,8 +12,12 @@ of the Salt system each have a respective configuration file. The
 .. seealso::
     :ref:`example minion configuration file <configuration-examples-minion>`
 
-The Salt Minion configuration is very simple, typically the only value that
-needs to be set is the master value so the minion can find its master.
+The Salt Minion configuration is very simple. Typically, the only value that
+needs to be set is the master value so the minion knows where to locate its master.
+
+By default, the salt-minion configuration will be in :file:`/etc/salt/minion`.
+A notable exception is FreeBSD, where the configuration will be in
+:file:`/usr/local/etc/salt/minion`.
 
 
 
@@ -40,11 +44,11 @@ The option can can also be set to a list of masters, enabling
 
 .. code-block:: yaml
 
-    master: 
+    master:
       - address1
       - address2
 
-.. versionchanged:: Helium
+.. versionchanged:: 2014.7.0
 
     The master can be dynamically configured. The :conf_minion:`master` value
     can be set to an module function which will be executed and will assume
@@ -66,7 +70,7 @@ The option can can also be set to a list of masters, enabling
 
     .. code-block:: yaml
 
-        master: 
+        master:
           - address1
           - address2
         master_type: failover
@@ -76,12 +80,26 @@ The option can can also be set to a list of masters, enabling
 ``master_type``
 ---------------
 
-.. versionadded:: Helium
+.. versionadded:: 2014.7.0
 
 Default: ``str``
 
-The type of the :conf_minion:`master` variable. Can be either ``func`` or
-``failover``.
+The type of the :conf_minion:`master` variable. Can be ``str``, ``failover`` or
+``func``.
+
+.. code-block:: yaml
+
+    master_type: failover
+
+If this option is set to ``failover``, :conf_minion:`master` must be a list of
+master addresses. The minion will then try each master in the order specified
+in the list until it successfully connects.  :conf_minion:`master_alive_interval`
+must also be set, this determines how often the minion will verify the presence
+of the master.
+
+.. code-block:: yaml
+
+    master_type: func
 
 If the master needs to be dynamically assigned by executing a function instead
 of reading in the static master value, set this to ``func``. This can be used
@@ -89,23 +107,21 @@ to manage the minion's master setting from an execution module. By simply
 changing the algorithm in the module to return a new master ip/fqdn, restart
 the minion and it will connect to the new master.
 
+``master_alive_interval``
+-------------------------
 
 .. code-block:: yaml
 
-    master_type: func
+    master_alive_interval: 30
 
-If this option is set to ``failover``, :conf_minion:`master` must be a list of
-master addresses. The minion will then try each master in the order specified
-in the list until it successfully connects.
-
-.. code-block:: yaml
-
-    master_type: failover
+Configures how often, in seconds, the minion will verify that the current
+master is alive and responding.  The minion will try to establish a connection
+to the next master in the list if it finds the existing one is dead.
 
 ``master_shuffle``
 ------------------
 
-.. versionadded:: Helium
+.. versionadded:: 2014.7.0
 
 Default: ``False``
 
@@ -116,6 +132,21 @@ Python's :func:`random.shuffle <python2:random.shuffle>` method.
 .. code-block:: yaml
 
     master_shuffle: True
+
+.. conf_minion:: retry_dns
+
+``retry_dns``
+---------------
+
+Default: ``30``
+
+Set the number of seconds to wait before attempting to resolve
+the master hostname if name resolution fails. Defaults to 30 seconds.
+Set to zero if the minion should shutdown and not retry.
+
+.. code-block:: yaml
+
+    retry_dns: 30
 
 .. conf_minion:: master_port
 
@@ -144,7 +175,44 @@ The user to run the Salt processes
 
     user: root
 
+.. conf_minion:: sudo_runas
+
+``sudo_runas``
+--------------
+
+Default: None
+
+The user to run salt remote execution commands as via sudo. If this option is
+enabled then sudo will be used to change the active user executing the remote
+command. If enabled the user will need to be allowed access via the sudoers file
+for the user that the salt minion is configured to run as. The most common
+option would be to use the root user. If this option is set the ``user`` option
+should also be set to a non-root user. If migrating from a root minion to a non
+root minion the minion cache should be cleared and the minion pki directory will
+need to be changed to the ownership of the new user.
+
+.. code-block:: yaml
+
+    sudo_user: root
+
+.. conf_minion:: sudo_user
+
+``sudo_user``
+-------------
+
+Default: ``''``
+
+Setting ``sudo_user`` will cause salt to run all execution modules under an
+sudo to the user given in ``sudo_user``.  The user under which the salt minion
+process itself runs will still be that provided in :conf_minion:`user` above,
+but all execution modules run by the minion will be rerouted through sudo.
+
+.. code-block:: yaml
+
+    sudo_user: saltadm
+
 .. conf_minion:: pidfile
+
 
 ``pidfile``
 -----------
@@ -229,6 +297,8 @@ Default: ``/var/cache/salt``
 
 The location for minion cache data.
 
+This directory may contain sensitive data and should be protected accordingly.
+
 .. code-block:: yaml
 
     cachedir: /var/cache/salt
@@ -248,7 +318,7 @@ Verify and set permissions on configuration directories at startup.
 
 .. note::
 
-    When marked as True the verify_env option requires WRITE access to the 
+    When marked as True the verify_env option requires WRITE access to the
     configuration directory (/etc/salt/). In certain situations such as
     mounting /etc/salt/ as read-only for templating this will create a
     stack trace when state.highstate is called.
@@ -269,10 +339,26 @@ executed. By default this feature is disabled, to enable set cache_jobs to
 
     cache_jobs: False
 
+.. conf_minion:: grains_cache
+
+``grains_cache``
+----------------
+
+Default: ``False``
+
+The minion can locally cache grain data instead of refreshing the data
+each time the grain is referenced. By default this feature is disabled,
+to enable set grains_cache to ``True``.
+
+.. code-block:: yaml
+
+    grains_cache: False
+
+
 .. conf_minion:: sock_dir
 
 ``sock_dir``
---------------
+------------
 
 Default: ``/var/run/salt/minion``
 
@@ -312,7 +398,7 @@ master.
 .. conf_minion:: random_reauth_delay
 
 ``random_reauth_delay``
-------------------------
+-----------------------
 
 When the master key changes, the minion will try to re-auth itself to
 receive the new master key. In larger environments this can cause a syn-flood
@@ -340,25 +426,109 @@ seconds each iteration.
 
     acceptance_wait_time_max: None
 
-.. conf_minion:: dns_check
+.. conf_minion:: recon_default
 
-``dns_check``
+``recon_default``
+-----------------
+
+Default: ``1000``
+
+The interval in milliseconds that the socket should wait before trying to
+reconnect to the master (1000ms = 1 second).
+
+.. code-block:: yaml
+
+    recon_default: 1000
+
+.. conf_minion:: recon_max
+
+``recon_max``
 -------------
+
+Default: ``10000``
+
+The maximum time a socket should wait. Each interval the time to wait is calculated
+by doubling the previous time. If recon_max is reached, it starts again at
+the recon_default.
+
+Short example:
+    - reconnect 1: the socket will wait 'recon_default' milliseconds
+    - reconnect 2: 'recon_default' * 2
+    - reconnect 3: ('recon_default' * 2) * 2
+    - reconnect 4: value from previous interval * 2
+    - reconnect 5: value from previous interval * 2
+    - reconnect x: if value >= recon_max, it starts again with recon_default
+
+.. code-block:: yaml
+
+    recon_max: 10000
+
+.. conf_minion:: recon_randomize
+
+``recon_randomize``
+-------------------
 
 Default: ``True``
 
-When healing, a dns_check is run. This is to make sure that the originally
-resolved dns has not changed. If this is something that does not happen in your
+Generate a random wait time on minion start. The wait time will be a random value
+between recon_default and recon_default and recon_max. Having all minions reconnect
+with the same recon_default and recon_max value kind of defeats the purpose of being
+able to change these settings. If all minions have the same values and the setup is
+quite large (several thousand minions), they will still flood the master. The desired
+behavior is to have time-frame within all minions try to reconnect.
+
+.. code-block:: yaml
+
+    recon_randomize: True
+
+.. conf_minion:: return_retry_timer
+
+``return_retry_timer``
+-------------------
+
+Default: ``5``
+
+The default timeout for a minion return attempt.
+
+.. code-block:: yaml
+
+    return_retry_timer: 5
+
+
+.. conf_minion:: return_retry_timer_max
+
+``return_retry_timer_max``
+-------------------
+
+Default: ``10``
+
+The maximum timeout for a minion return attempt. If non-zero the minion return
+retry timeout will be a random int beween ``return_retry_timer`` and
+``return_retry_timer_max``
+
+.. code-block:: yaml
+
+    return_retry_timer_max: 10
+
+.. conf_minion:: cache_sreqs
+
+``cache_sreqs``
+---------------
+
+Default: ``True``
+
+The connection to the master ret_port is kept open. When set to False, the minion
+creates a new connection for every return to the master.
 environment, set this value to ``False``.
 
 .. code-block:: yaml
 
-    dns_check: True
+    cache_sreqs: True
 
 .. conf_minion:: ipc_mode
 
 ``ipc_mode``
--------------
+------------
 
 Default: ``ipc``
 
@@ -412,7 +582,7 @@ be able to execute a certain module. The sys module is built into the minion
 and cannot be disabled.
 
 This setting can also tune the minion, as all modules are loaded into ram
-disabling modules will lover the minion's ram footprint.
+disabling modules will lower the minion's ram footprint.
 
 .. code-block:: yaml
 
@@ -520,6 +690,23 @@ This setting requires that ``gcc`` and ``cython`` are installed on the minion
 
     cython_enable: False
 
+.. conf_minion:: enable_zip_modules
+
+``enable_zip_modules``
+----------------------
+
+.. versionadded:: 2015.8.0
+
+Default: ``False``
+
+Set this value to true to enable loading of zip archives as extension modules.
+This allows for packing module code with specific dependencies to avoid conflicts
+and/or having to install specific modules' dependencies in system libraries.
+
+.. code-block:: yaml
+
+    enable_zip_modules: False
+
 .. conf_minion:: providers
 
 ``providers``
@@ -537,7 +724,7 @@ below.
     providers:
       service: systemd
 
-      
+
 State Management Settings
 =========================
 
@@ -648,6 +835,20 @@ directed to look on the minion by setting this parameter to ``local``.
 
     file_client: remote
 
+.. conf_minion:: use_master_when_local
+
+``use_master_when_local``
+-------------------------
+
+Default: ``False``
+
+When using a local :conf_minion:`file_client`, this parameter is used to allow
+the client to connect to a master for remote execution.
+
+.. code-block:: yaml
+
+    use_master_when_local: False
+
 .. conf_minion:: file_roots
 
 ``file_roots``
@@ -662,7 +863,7 @@ Default:
 
 When using a local :conf_minion:`file_client`, this parameter is used to setup
 the fileserver's environments. This parameter operates identically to the
-:conf_master:`master config parameter of the same name <file_roots>`.
+:conf_master:`master config parameter <file_roots>` of the same name.
 
 .. code-block:: yaml
 
@@ -676,7 +877,7 @@ the fileserver's environments. This parameter operates identically to the
         - /srv/salt/prod/services
         - /srv/salt/prod/states
 
-.. conf_master:: hash_type
+.. conf_minion:: hash_type
 
 ``hash_type``
 -------------
@@ -684,7 +885,7 @@ the fileserver's environments. This parameter operates identically to the
 Default: ``md5``
 
 The hash_type is the hash to use when discovering the hash of a file on the
-local fileserver. The default is md5, but sha1, sha224, sha256, sha384 and
+local fileserver. The default is md5, but sha1, sha224, sha256, sha384, and
 sha512 are also supported.
 
 .. code-block:: yaml
@@ -736,7 +937,76 @@ minion to clean the keys.
 
     open_mode: False
 
+.. conf_minion:: master_finger
 
+``master_finger``
+-----------------
+
+Default: ``''``
+
+Fingerprint of the master public key to validate the identity of your Salt master
+before the initial key exchange. The master fingerprint can be found by running
+"salt-key -F master" on the Salt master.
+
+.. code-block:: yaml
+
+   master_finger: 'ba:30:65:2a:d6:9e:20:4f:d8:b2:f3:a7:d4:65:11:13'
+
+.. conf_minion:: verify_master_pubkey_sign
+
+
+``verify_master_pubkey_sign``
+-----------------------------
+
+Default: ``False``
+
+Enables verification of the master-public-signature returned by the master in
+auth-replies. Please see the tutorial on how to configure this properly
+`Multimaster-PKI with Failover Tutorial <http://docs.saltstack.com/en/latest/topics/tutorials/multimaster_pki.html>`_
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    verify_master_pubkey_sign: True
+
+If this is set to ``True``, :conf_master:`master_sign_pubkey` must be also set
+to ``True`` in the master configuration file.
+
+
+.. conf_minion:: master_sign_key_name
+
+``master_sign_key_name``
+------------------------
+
+Default: ``master_sign``
+
+The filename without the *.pub* suffix of the public key that should be used
+for verifying the signature from the master. The file must be located in the
+minion's pki directory.
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    master_sign_key_name: <filename_without_suffix>
+
+.. conf_minion:: always_verify_signature
+
+``always_verify_signature``
+---------------------------
+
+Default: ``False``
+
+If :conf_minion:`verify_master_pubkey_sign` is enabled, the signature is only verified,
+if the public-key of the master changes. If the signature should always be verified,
+this can be set to ``True``.
+
+.. versionadded:: 2014.7.0
+
+.. code-block:: yaml
+
+    always_verify_signature: True
 
 Thread Settings
 ===============
@@ -745,8 +1015,11 @@ Thread Settings
 
 Default: ``True``
 
-Disable multiprocessing support by default when a minion receives a
+If `multiprocessing` is enabled when a minion receives a
 publication a new process is spawned and the command is executed therein.
+Conversely, if `multiprocessing` is disabled the new publication will be run
+executed in a thread.
+
 
 .. code-block:: yaml
 
@@ -767,7 +1040,7 @@ Minion Logging Settings
 
 Default: ``/var/log/salt/minion``
 
-The minion log can be sent to a regular file, local path name, or network 
+The minion log can be sent to a regular file, local path name, or network
 location.  See also :conf_log:`log_file`.
 
 Examples:
@@ -785,13 +1058,12 @@ Examples:
     log_file: udp://loghost:10514
 
 
-
 .. conf_minion:: log_level
 
 ``log_level``
 -------------
 
-Default: ``warning``
+Default: ``info``
 
 The level of messages to send to the console. See also :conf_log:`log_level`.
 
@@ -800,22 +1072,20 @@ The level of messages to send to the console. See also :conf_log:`log_level`.
     log_level: warning
 
 
-
-
 .. conf_minion:: log_level_logfile
 
 ``log_level_logfile``
 ---------------------
 
-Default: ``warning``
+Default: ``info``
 
-The level of messages to send to the log file. See also 
-:conf_log:`log_level_logfile`.
+The level of messages to send to the log file. See also
+:conf_log:`log_level_logfile`. When it is not set explicitly
+it will inherit the level set by :conf_log:`log_level` option.
 
 .. code-block:: yaml
 
     log_level_logfile: warning
-
 
 
 .. conf_minion:: log_datefmt
@@ -825,14 +1095,12 @@ The level of messages to send to the log file. See also
 
 Default: ``%H:%M:%S``
 
-The date and time format used in console log messages. See also 
+The date and time format used in console log messages. See also
 :conf_log:`log_datefmt`.
 
 .. code-block:: yaml
 
     log_datefmt: '%H:%M:%S'
-
-
 
 
 .. conf_minion:: log_datefmt_logfile
@@ -842,13 +1110,12 @@ The date and time format used in console log messages. See also
 
 Default: ``%Y-%m-%d %H:%M:%S``
 
-The date and time format used in log file messages. See also 
+The date and time format used in log file messages. See also
 :conf_log:`log_datefmt_logfile`.
 
 .. code-block:: yaml
 
     log_datefmt_logfile: '%Y-%m-%d %H:%M:%S'
-
 
 
 .. conf_minion:: log_fmt_console
@@ -858,13 +1125,30 @@ The date and time format used in log file messages. See also
 
 Default: ``[%(levelname)-8s] %(message)s``
 
-The format of the console logging messages. See also 
+The format of the console logging messages. See also
 :conf_log:`log_fmt_console`.
+
+.. note::
+    Log colors are enabled in ``log_fmt_console`` rather than the
+    :conf_minion:`color` config since the logging system is loaded before the
+    minion config.
+
+    Console log colors are specified by these additional formatters:
+
+    %(colorlevel)s
+    %(colorname)s
+    %(colorprocess)s
+    %(colormsg)s
+
+    Since it is desirable to include the surrounding brackets, '[' and ']', in
+    the coloring of the messages, these color formatters also include padding
+    as well.  Color LogRecord attributes are only available for console
+    logging.
 
 .. code-block:: yaml
 
+    log_fmt_console: '%(colorlevel)s %(colormsg)s'
     log_fmt_console: '[%(levelname)-8s] %(message)s'
-
 
 
 .. conf_minion:: log_fmt_logfile
@@ -874,13 +1158,12 @@ The format of the console logging messages. See also
 
 Default: ``%(asctime)s,%(msecs)03.0f [%(name)-17s][%(levelname)-8s] %(message)s``
 
-The format of the log file logging messages. See also 
+The format of the log file logging messages. See also
 :conf_log:`log_fmt_logfile`.
 
 .. code-block:: yaml
 
     log_fmt_logfile: '%(asctime)s,%(msecs)03.0f [%(name)-17s][%(levelname)-8s] %(message)s'
-
 
 
 .. conf_minion:: log_granular_levels
@@ -890,10 +1173,24 @@ The format of the log file logging messages. See also
 
 Default: ``{}``
 
-This can be used to control logging levels more specifically. See also 
+This can be used to control logging levels more specifically. See also
 :conf_log:`log_granular_levels`.
 
 
+.. conf_minion:: failhard
+
+``failhard``
+------------
+
+Default: ``False``
+
+Set the global failhard flag, this informs all states to stop running states
+at the moment a single state fails
+
+
+.. code-block:: yaml
+
+    failhard: False
 
 Include Configuration
 =====================
@@ -974,3 +1271,85 @@ have other services that need to go with it.
 .. code-block:: yaml
 
     update_restart_services: ['salt-minion']
+
+
+.. _winrepo-minion-config-opts:
+
+Standalone Minion Windows Software Repo Settings
+================================================
+
+.. important::
+    To use these config options, the minion must be running in masterless mode
+    (set :conf_minion:`file_client` to ``local``).
+
+.. conf_minion:: winrepo_dir
+.. conf_minion:: win_repo
+
+``winrepo_dir``
+---------------
+
+.. versionchanged:: 2015.8.0
+    Renamed from ``win_repo`` to ``winrepo_dir``. Also, this option did not
+    have a default value until this version.
+
+Default: ``C:\salt\srv\salt\win\repo``
+
+Location on the minion where the :conf_minion:`winrepo_remotes` are checked
+out.
+
+.. code-block:: yaml
+
+    winrepo_dir: 'D:\winrepo'
+
+.. conf_minion:: winrepo_cachefile
+.. conf_minion:: win_repo_cachefile
+
+``winrepo_cachefile``
+---------------------
+
+.. versionchanged:: 2015.8.0
+    Renamed from ``win_repo_cachefile`` to ``winrepo_cachefile``. Also,
+    this option did not have a default value until this version.
+
+Default: ``winrepo.p``
+
+Path relative to :conf_minion:`winrepo_dir` where the winrepo cache should be
+created.
+
+.. code-block:: yaml
+
+    winrepo_cachefile: winrepo.p
+
+.. conf_minion:: winrepo_remotes
+.. conf_minion:: win_gitrepos
+
+``winrepo_remotes``
+-------------------
+
+.. versionchanged:: 2015.8.0
+    Renamed from ``win_gitrepos`` to ``winrepo_remotes``. Also, this option did
+    not have a default value until this version.
+
+
+.. versionadded:: 2015.8.0
+
+Default: ``['https://github.com/saltstack/salt-winrepo.git']``
+
+List of git repositories to checkout and include in the winrepo
+
+.. code-block:: yaml
+
+    winrepo_remotes:
+      - https://github.com/saltstack/salt-winrepo.git
+
+To specify a specific revision of the repository, prepend a commit ID to the
+URL of the the repository:
+
+.. code-block:: yaml
+
+    winrepo_remotes:
+      - '<commit_id> https://github.com/saltstack/salt-winrepo.git'
+
+Replace ``<commit_id>`` with the SHA1 hash of a commit ID. Specifying a commit
+ID is useful in that it allows one to revert back to a previous version in the
+event that an error is introduced in the latest revision of the repo.

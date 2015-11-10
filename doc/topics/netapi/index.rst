@@ -27,7 +27,7 @@ Communication with Salt and Salt satellite projects is done using Salt's own
 
 .. admonition:: salt-api
 
-    Prior to Salt's Helium release, netapi modules lived in the separate sister
+    Prior to Salt's 2014.7.0 release, netapi modules lived in the separate sister
     projected ``salt-api``. That project has been merged into the main Salt
     project.
 
@@ -42,4 +42,4 @@ simply by creating a data structure. (And this is exactly how much of Salt's
 own internals work!)
 
 .. autoclass:: salt.netapi.NetapiClient
-    :members: local, local_async, local_batch, runner, wheel
+    :members: local, local_async, local_batch, local_subset, runner, wheel

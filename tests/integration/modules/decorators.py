@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 
+# Import Python libs
+from __future__ import absolute_import
+
 # Import Salt Testing libs
 from salttesting.helpers import ensure_in_syspath
 ensure_in_syspath('../../')
@@ -16,10 +19,11 @@ class DecoratorTest(integration.ModuleCase):
                     )
                 )
 
-    def not_test_depends(self):
+    def test_depends(self):
         ret = self.run_function('runtests_decorators.depends')
+        self.assertTrue(isinstance(ret, dict))
         self.assertTrue(ret['ret'])
-        self.assertTrue(type(ret['time']) == float)
+        self.assertTrue(isinstance(ret['time'], float))
 
     def test_missing_depends(self):
         self.assertIn(
@@ -28,14 +32,30 @@ class DecoratorTest(integration.ModuleCase):
                     )
                 )
 
-    def not_test_depends_will_fallback(self):
-        ret = self.run_function('runtests_decorators.depends_will_fallback')
-        self.assertTrue(ret['ret'])
-        self.assertTrue(type(ret['time']) == float)
+    def test_bool_depends(self):
+        # test True
+        self.assertTrue(
+                self.run_function(
+                    'runtests_decorators.booldependsTrue'
+                    )
+                )
 
-    def test_missing_depends_again(self):
+        # test False
         self.assertIn(
-                'fallback',
+                'is not available',
+                self.run_function('runtests_decorators.booldependsFalse'
+                    )
+                )
+
+    def test_depends_will_not_fallback(self):
+        ret = self.run_function('runtests_decorators.depends_will_not_fallback')
+        self.assertTrue(isinstance(ret, dict))
+        self.assertTrue(ret['ret'])
+        self.assertTrue(isinstance(ret['time'], float))
+
+    def test_missing_depends_will_fallback(self):
+        self.assertListEqual(
+                [False, 'fallback'],
                 self.run_function(
                     'runtests_decorators.missing_depends_will_fallback'
                     )

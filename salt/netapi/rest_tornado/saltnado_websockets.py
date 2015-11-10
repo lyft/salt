@@ -7,7 +7,7 @@ A Websockets add-on to saltnado
 
 :depends:   - tornado Python module
 
-In order to enable saltnado_webosockets you must add websockets: True to your
+In order to enable saltnado_websockets you must add websockets: True to your
 saltnado config block.
 
 .. code-block:: yaml
@@ -289,9 +289,11 @@ in which each job's information is keyed by salt's ``jid``.
 Setup
 =====
 '''
+from __future__ import absolute_import
 
 import tornado.websocket
 from . import event_processor
+from .saltnado import _check_cors_origin
 
 import tornado.gen
 
@@ -304,31 +306,39 @@ import logging
 logger = logging.getLogger()
 
 
-class AllEventsHandler(tornado.websocket.WebSocketHandler):  # pylint: disable=W0232
+class AllEventsHandler(tornado.websocket.WebSocketHandler):  # pylint: disable=W0223,W0232
     '''
     Server side websocket handler.
     '''
-    def open(self, token):
+
+    # pylint: disable=W0221
+    def get(self, token):
         '''
-        Return a websocket connection to Salt
-        representing Salt's "real time" event stream.
+        Check the token, returns a 401 if the token is invalid.
+        Else open the websocket connection
         '''
-        logger.debug('In the websocket open method')
+        logger.debug('In the websocket get method')
 
         self.token = token
         # close the connection, if not authenticated
         if not self.application.auth.get_tok(token):
             logger.debug('Refusing websocket connection, bad token!')
-            self.close()
+            self.send_error(401)
             return
+        super(AllEventsHandler, self).get(token)
 
+    def open(self, token):  # pylint: disable=W0221
+        '''
+        Return a websocket connection to Salt
+        representing Salt's "real time" event stream.
+        '''
         self.connected = False
 
     @tornado.gen.coroutine
     def on_message(self, message):
         """Listens for a "websocket client ready" message.
         Once that message is received an asynchronous job
-        is stated that yeilds messages to the client.
+        is stated that yields messages to the client.
         These messages make up salt's
         "real time" event stream.
         """
@@ -361,14 +371,26 @@ class AllEventsHandler(tornado.websocket.WebSocketHandler):  # pylint: disable=W
         logger.debug('In the websocket close method')
         self.close()
 
+    def check_origin(self, origin):
+        """
+        If cors is enabled, check that the origin is allowed
+        """
 
-class FormattedEventsHandler(AllEventsHandler):  # pylint: disable=W0232
+        mod_opts = self.application.mod_opts
+
+        if mod_opts.get('cors_origin'):
+            return bool(_check_cors_origin(origin, mod_opts['cors_origin']))
+        else:
+            return super(AllEventsHandler, self).check_origin(origin)
+
+
+class FormattedEventsHandler(AllEventsHandler):  # pylint: disable=W0223,W0232
 
     @tornado.gen.coroutine
     def on_message(self, message):
         """Listens for a "websocket client ready" message.
         Once that message is received an asynchronous job
-        is stated that yeilds messages to the client.
+        is stated that yields messages to the client.
         These messages make up salt's
         "real time" event stream.
         """
