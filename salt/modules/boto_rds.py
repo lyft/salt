@@ -70,7 +70,7 @@ def __virtual__():
     '''
     if not HAS_BOTO:
         return False
-    __utils__['boto.assign_funcs'](__name__, 'rds', module='rds2')
+    __utils__['boto.assign_funcs'](__name__, 'rds', module='rds2', pack=__salt__)
     return True
 
 
@@ -171,7 +171,7 @@ def subnet_group_exists(name, tags=None, region=None, key=None, keyid=None,
         return False
 
 
-def create(name, allocated_storage, storage_type, db_instance_class, engine,
+def create(name, allocated_storage, db_instance_class, engine,
            master_username, master_user_password, db_name=None,
            db_security_groups=None, vpc_security_group_ids=None,
            availability_zone=None, db_subnet_group_name=None,
@@ -187,21 +187,15 @@ def create(name, allocated_storage, storage_type, db_instance_class, engine,
 
     CLI example to create an RDS::
 
-        salt myminion boto_rds.create myrds 10 db.t2.micro MySQL sqlusr sqlpass
+        salt myminion boto_rds.create myrds 10 db.t2.micro MySQL sqlusr sqlpassw
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
     if __salt__['boto_rds.exists'](name, tags, region, key, keyid, profile):
         return True
 
-    a_s = ['standard', 'gp2', 'io1']
     if not allocated_storage:
         raise SaltInvocationError('allocated_storage is required')
-    if not storage_type:
-        raise SaltInvocationError('storage_type is required')
-    if storage_type not in a_s:
-        raise SaltInvocationError('storage_type must be one of: '
-                                  '{0}'.format(", ".join(str(e) for e in a_s)))
     if not db_instance_class:
         raise SaltInvocationError('db_instance_class is required')
     if not engine:
@@ -231,7 +225,7 @@ def create(name, allocated_storage, storage_type, db_instance_class, engine,
                                       preferred_backup_window, port, multi_az,
                                       engine_version,
                                       auto_minor_version_upgrade,
-                                      license_model, storage_type, iops,
+                                      license_model, iops,
                                       option_group_name, character_set_name,
                                       publicly_accessible, tags)
         if not rds:
@@ -253,7 +247,7 @@ def create(name, allocated_storage, storage_type, db_instance_class, engine,
 
     except boto.exception.BotoServerError as e:
         log.debug(e)
-        msg = 'Failed to create RDS {0}'.format(name)
+        msg = 'Failed to create RDS {0}, reason: {1}'.format(name, e.body)
         log.error(msg)
         return False
 
@@ -492,7 +486,7 @@ def delete(name, skip_final_snapshot=None, final_db_snapshot_identifier=None,
     '''
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
 
-    if not skip_final_snapshot or final_db_snapshot_identifier:
+    if not skip_final_snapshot and not final_db_snapshot_identifier:
         raise SaltInvocationError('At least on of the following must'
                                   ' be specified: skip_final_snapshot'
                                   ' final_db_snapshot_identifier')

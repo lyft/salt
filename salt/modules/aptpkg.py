@@ -2,8 +2,13 @@
 '''
 Support for APT (Advanced Packaging Tool)
 
-.. note::
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
 
+.. note::
     For virtual package support, either the ``python-apt`` or ``dctrl-tools``
     package must be installed.
 
@@ -84,9 +89,7 @@ def __virtual__():
     '''
     Confirm this module is on a Debian based system
     '''
-    if __grains__.get('os_family', False) == 'Kali':
-        return __virtualname__
-    elif __grains__.get('os_family', False) == 'Debian':
+    if __grains__.get('os_family') in ('Kali', 'Debian'):
         return __virtualname__
     return False
 
@@ -298,7 +301,7 @@ def latest_version(*names, **kwargs):
     return ret
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def version(*names, **kwargs):
@@ -471,7 +474,7 @@ def install(name=None,
 
         .. versionadded:: 2015.5.0
 
-   force_conf_new
+    force_conf_new
         Always install the new version of any configuration files.
 
         .. versionadded:: 2015.8.0
@@ -835,9 +838,10 @@ def purge(name=None, pkgs=None, **kwargs):
 
 def upgrade(refresh=True, dist_upgrade=False, **kwargs):
     '''
-    Upgrades all packages via ``apt-get dist-upgrade``
+    Upgrades all packages via ``apt-get upgrade`` or ``apt-get dist-upgrade``
+    if  ``dist_upgrade`` is ``True``.
 
-    Returns a dict containing the changes.
+    Returns a dict containing the changes::
 
         {'<package>':  {'old': '<old-version>',
                         'new': '<new-version>'}}
@@ -846,9 +850,9 @@ def upgrade(refresh=True, dist_upgrade=False, **kwargs):
         Whether to perform the upgrade using dist-upgrade vs upgrade.  Default
         is to use upgrade.
 
-    .. versionadded:: 2014.7.0
+        .. versionadded:: 2014.7.0
 
-   force_conf_new
+    force_conf_new
         Always install the new version of any configuration files.
 
         .. versionadded:: 2015.8.0
@@ -1624,20 +1628,38 @@ def mod_repo(repo, saltenv='base', **kwargs):
     '''
     Modify one or more values for a repo.  If the repo does not exist, it will
     be created, so long as the definition is well formed.  For Ubuntu the
-    "ppa:<project>/repo" format is acceptable. "ppa:" format can only be
+    ``ppa:<project>/repo`` format is acceptable. ``ppa:`` format can only be
     used to create a new repository.
 
-    The following options are available to modify a repo definition::
+    The following options are available to modify a repo definition:
 
-        comps (a comma separated list of components for the repo, e.g. "main")
-        file (a file name to be used)
-        keyserver (keyserver to get gpg key from)
-        keyid (key id to load with the keyserver argument)
-        key_url (URL to a gpg key to add to the apt gpg keyring)
-        consolidate (if true, will attempt to de-dup and consolidate sources)
+        comps
+            a comma separated list of components for the repo, e.g. ``main``
 
-        * Note: Due to the way keys are stored for apt, there is a known issue
-                where the key wont be updated unless another change is made
+        file
+            a file name to be used
+
+        keyserver
+            keyserver to get gpg key from
+
+        keyid
+            key id to load with the keyserver argument
+
+        key_url
+            URL to a GPG key to add to the APT GPG keyring
+
+        consolidate
+            if ``True``, will attempt to de-dup and consolidate sources
+
+        comments
+            Sometimes you want to supply additional information, but not as
+            enabled configuration. Anything supplied for this list will be saved
+            in the repo configuration with a comment marker (#) in front.
+
+            .. versionadded:: 2015.8.9
+
+        .. note:: Due to the way keys are stored for APT, there is a known issue
+                where the key won't be updated unless another change is made
                 at the same time.  Keys should be properly added on initial
                 configuration.
 
@@ -1656,16 +1678,19 @@ def mod_repo(repo, saltenv='base', **kwargs):
             # secure PPAs cannot be supported as of the time of this code
             # implementation via apt-add-repository.  The code path for
             # secure PPAs should be the same as urllib method
-            if HAS_SOFTWAREPROPERTIES and 'ppa_auth' not in kwargs:
+            if salt.utils.which('apt-add-repository') \
+                    and 'ppa_auth' not in kwargs:
                 repo_info = get_repo(repo)
                 if repo_info:
                     return {repo: repo_info}
                 else:
                     if float(__grains__['osrelease']) < 12.04:
-                        cmd = 'apt-add-repository {0}'.format(_cmd_quote(repo))
+                        cmd = ['apt-add-repository', repo]
                     else:
-                        cmd = 'apt-add-repository -y {0}'.format(_cmd_quote(repo))
-                    out = __salt__['cmd.run_all'](cmd, **kwargs)
+                        cmd = ['apt-add-repository', '-y', repo]
+                    out = __salt__['cmd.run_all'](cmd,
+                                                  python_shell=False,
+                                                  **kwargs)
                     if out['retcode']:
                         raise CommandExecutionError(
                              'Unable to add PPA {0!r}. '
@@ -1855,6 +1880,8 @@ def mod_repo(repo, saltenv='base', **kwargs):
         if 'comments' in kwargs:
             mod_source.comment = " ".join(str(c) for c in kwargs['comments'])
         sources.list.append(mod_source)
+    elif 'comments' in kwargs:
+        mod_source.comment = " ".join(str(c) for c in kwargs['comments'])
 
     for key in kwargs:
         if key in _MODIFY_OK and hasattr(mod_source, key):
@@ -1922,23 +1949,27 @@ def _strip_uri(repo):
     return ' '.join(splits)
 
 
-def expand_repo_def(repokwargs):
+def expand_repo_def(**kwargs):
     '''
     Take a repository definition and expand it to the full pkg repository dict
     that can be used for comparison.  This is a helper function to make
     the Debian/Ubuntu apt sources sane for comparison in the pkgrepo states.
 
-    There is no use to calling this function via the CLI.
+    This is designed to be called from pkgrepo states and will have little use
+    being called on the CLI.
     '''
+    if 'repo' not in kwargs:
+        raise SaltInvocationError('missing \'repo\' argument')
+
     _check_apt()
 
     sanitized = {}
-    repo = _strip_uri(repokwargs['repo'])
+    repo = _strip_uri(kwargs['repo'])
     if repo.startswith('ppa:') and __grains__['os'] in ('Ubuntu', 'Mint'):
         dist = __grains__['lsb_distrib_codename']
         owner_name, ppa_name = repo[4:].split('/', 1)
-        if 'ppa_auth' in repokwargs:
-            auth_info = '{0}@'.format(repokwargs['ppa_auth'])
+        if 'ppa_auth' in kwargs:
+            auth_info = '{0}@'.format(kwargs['ppa_auth'])
             repo = LP_PVT_SRC_FORMAT.format(auth_info, owner_name, ppa_name,
                                             dist)
         else:
@@ -1950,15 +1981,15 @@ def expand_repo_def(repokwargs):
             else:
                 repo = LP_SRC_FORMAT.format(owner_name, ppa_name, dist)
 
-        if 'file' not in repokwargs:
+        if 'file' not in kwargs:
             filename = '/etc/apt/sources.list.d/{0}-{1}-{2}.list'
-            repokwargs['file'] = filename.format(owner_name, ppa_name,
+            kwargs['file'] = filename.format(owner_name, ppa_name,
                                                  dist)
 
     source_entry = sourceslist.SourceEntry(repo)
     for kwarg in _MODIFY_OK:
-        if kwarg in repokwargs:
-            setattr(source_entry, kwarg, repokwargs[kwarg])
+        if kwarg in kwargs:
+            setattr(source_entry, kwarg, kwargs[kwarg])
 
     sanitized['file'] = source_entry.file
     sanitized['comps'] = getattr(source_entry, 'comps', [])
@@ -2040,10 +2071,10 @@ def set_selections(path=None, selection=None, clear=False, saltenv='base'):
 
     The state can be any one of, documented in ``dpkg(1)``:
 
-     - install
-     - hold
-     - deinstall
-     - purge
+    - install
+    - hold
+    - deinstall
+    - purge
 
     This command is commonly used to mark specific packages to be held from
     being upgraded, that is, to be kept at a certain version. When a state is
@@ -2221,7 +2252,12 @@ def owner(*paths):
 
 def info_installed(*names):
     '''
-    Return the information of the named package(s), installed on the system.
+    Return the information of the named package(s) installed on the system.
+
+    .. versionadded:: 2015.8.1
+
+    names
+        The names of the packages for which to return information.
 
     CLI example:
 

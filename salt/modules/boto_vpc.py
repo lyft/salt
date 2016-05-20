@@ -128,7 +128,7 @@ def __virtual__():
 def __init__(opts):
     salt.utils.compat.pack_dunder(__name__)
     if HAS_BOTO:
-        __utils__['boto.assign_funcs'](__name__, 'vpc')
+        __utils__['boto.assign_funcs'](__name__, 'vpc', pack=__salt__)
 
 
 def _check_vpc(vpc_id, vpc_name, region, key, keyid, profile):
@@ -717,7 +717,7 @@ def _find_subnets(subnet_name=None, vpc_id=None, cidr=None, tags=None, conn=None
     '''
 
     if not any(subnet_name, tags, cidr):
-        raise SaltInvocationError('At least on of the following must be '
+        raise SaltInvocationError('At least one of the following must be '
                                   'specified: subnet_name, cidr or tags.')
 
     filter_parameters = {'filters': {}}
@@ -777,7 +777,7 @@ def create_subnet(vpc_id=None, cidr_block=None, vpc_name=None,
     return _create_resource('subnet', name=subnet_name, tags=tags,
                             vpc_id=vpc_id, cidr_block=cidr_block,
                             region=region, key=key, keyid=keyid,
-                            profile=profile)
+                            profile=profile, availability_zone=availability_zone)
 
 
 def delete_subnet(subnet_id=None, subnet_name=None, region=None, key=None,
@@ -1793,10 +1793,10 @@ def route_exists(destination_cidr_block, route_table_name=None, route_table_id=N
     '''
 
     if not any((route_table_name, route_table_id)):
-        raise SaltInvocationError('At least on of the following must be specified: route table name or route table id.')
+        raise SaltInvocationError('At least one of the following must be specified: route table name or route table id.')
 
     if not any((gateway_id, instance_id, interface_id)):
-        raise SaltInvocationError('At least on of the following must be specified: gateway id, instance id'
+        raise SaltInvocationError('At least one of the following must be specified: gateway id, instance id'
                                   ' or interface id.')
 
     try:
@@ -2115,7 +2115,7 @@ def describe_route_table(route_table_id=None, route_table_name=None,
         route_tables = conn.get_all_route_tables(**filter_parameters)
 
         if not route_tables:
-            return False
+            return {}
 
         route_table = {}
         keys = ['id', 'vpc_id', 'tags', 'routes', 'associations']

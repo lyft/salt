@@ -25,7 +25,12 @@ filemod.__salt__ = {
     'cmd.run': cmdmod.run,
     'cmd.run_all': cmdmod.run_all
 }
-filemod.__opts__ = {'test': False}
+filemod.__opts__ = {
+    'test': False,
+    'file_roots': {'base': 'tmp'},
+    'pillar_roots': {'base': 'tmp'},
+    'cachedir': 'tmp',
+}
 
 SED_CONTENT = """test
 some
@@ -33,6 +38,9 @@ content
 /var/lib/foo/app/test
 here
 """
+
+filemod.__grains__ = {}
+filemod.__pillar__ = {}
 
 
 class FileReplaceTestCase(TestCase):
@@ -249,7 +257,7 @@ class FileBlockReplaceTestCase(TestCase):
         )
         with salt.utils.fopen(self.tfile.name, 'r') as fp:
             self.assertNotIn('#-- START BLOCK 2'
-                             + "\n" + new_content + "\n"
+                             + "\n" + new_content
                              + '#-- END BLOCK 2', fp.read())
 
         filemod.blockreplace(self.tfile.name,
@@ -262,7 +270,7 @@ class FileBlockReplaceTestCase(TestCase):
         with salt.utils.fopen(self.tfile.name, 'r') as fp:
             self.assertIn('#-- START BLOCK 2'
                           + "\n" + new_content
-                          + "\n" + '#-- END BLOCK 2', fp.read())
+                          + '#-- END BLOCK 2', fp.read())
 
     def test_replace_append_newline_at_eof(self):
         '''
@@ -276,7 +284,7 @@ class FileBlockReplaceTestCase(TestCase):
                 'content': 'baz',
                 'append_if_not_found': True,
         }
-        block = '{marker_start}\n{content}\n{marker_end}\n'.format(**args)
+        block = '{marker_start}\n{content}{marker_end}\n'.format(**args)
         expected = base + '\n' + block
         # File ending with a newline
         with tempfile.NamedTemporaryFile(mode='w+') as tfile:
@@ -314,7 +322,7 @@ class FileBlockReplaceTestCase(TestCase):
         with salt.utils.fopen(self.tfile.name, 'r') as fp:
             self.assertNotIn(
                 '#-- START BLOCK 2' + "\n"
-                + new_content + "\n" + '#-- END BLOCK 2',
+                + new_content + '#-- END BLOCK 2',
                 fp.read())
 
         filemod.blockreplace(self.tfile.name,
@@ -328,7 +336,7 @@ class FileBlockReplaceTestCase(TestCase):
                 fp.read().startswith(
                     '#-- START BLOCK 2'
                     + "\n" + new_content
-                    + "\n" + '#-- END BLOCK 2'))
+                    + '#-- END BLOCK 2'))
 
     def test_replace_partial_marked_lines(self):
         filemod.blockreplace(self.tfile.name,
@@ -515,6 +523,20 @@ class FileModuleTestCase(TestCase):
         group = 5034
         ret = filemod.group_to_gid(group)
         self.assertEqual(ret, group)
+
+    def test_apply_template_on_contents(self):
+        '''
+        Tests that the templating engine works on string contents
+        '''
+        contents = 'This is a {{ template }}.'
+        defaults = {'template': 'templated file'}
+        ret = filemod.apply_template_on_contents(
+            contents,
+            template='jinja',
+            context={'opts': filemod.__opts__},
+            defaults=defaults,
+            saltenv='base')
+        self.assertEqual(ret, 'This is a templated file.')
 
 
 if __name__ == '__main__':

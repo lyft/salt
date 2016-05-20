@@ -71,9 +71,9 @@ config:
               - destination_cidr_block: 0.0.0.0/0
                 instance_id: i-123456
                 interface_id: eni-123456
-            - subnets:
-              - name: subnet1
-              - name: subnet2
+            - subnet_names:
+              - subnet1
+              - subnet2
             - region: us-east-1
             - keyid: GKTADJGHEIQSXMKKRBJ08H
             - key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
@@ -757,7 +757,11 @@ def _subnets_present(route_table_name, subnet_ids=None, subnet_names=None, tags=
     assoc_ids = [x['subnet_id'] for x in route_table['associations']]
 
     to_create = [x for x in subnet_ids if x not in assoc_ids]
-    to_delete = [x['id'] for x in route_table['associations'] if x['subnet_id'] not in subnet_ids]
+    to_delete = []
+    for x in route_table['associations']:
+        # Don't remove the main route table association
+        if x['subnet_id'] not in subnet_ids and x['subnet_id'] is not None:
+            to_delete.append(x['id'])
 
     if to_create or to_delete:
         if __opts__['test']:

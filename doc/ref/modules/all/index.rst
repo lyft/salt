@@ -1,4 +1,4 @@
-.. _all-salt.modules:
+.. _all-salt_modules:
 
 ======================================
 Full list of builtin execution modules
@@ -53,6 +53,7 @@ Full list of builtin execution modules
     cabal
     cassandra
     cassandra_cql
+    chassis
     chef
     chocolatey
     cloud
@@ -65,7 +66,6 @@ Full list of builtin execution modules
     cpan
     cron
     cyg
-    cytest
     daemontools
     darwin_pkgutil
     darwin_sysctl
@@ -88,12 +88,14 @@ Full list of builtin execution modules
     dockerng
     dpkg
     drac
+    dracr
     drbd
     ebuild
     eix
     elasticsearch
     environ
     eselect
+    esxi
     etcd_mod
     event
     extfs
@@ -115,6 +117,7 @@ Full list of builtin execution modules
     gnomedesktop
     gpg
     grains
+    group
     groupadd
     grub_legacy
     guestfs
@@ -234,7 +237,6 @@ Full list of builtin execution modules
     redismod
     reg
     rest_package
-    rest_sample
     rest_service
     ret
     rh_ip
@@ -258,6 +260,7 @@ Full list of builtin execution modules
     service
     shadow
     slack_notify
+    slsutil
     smartos_imgadm
     smartos_virt
     smartos_vmadm
@@ -288,7 +291,6 @@ Full list of builtin execution modules
     sysrc
     system
     system_profiler
-    system_rest_sample
     systemd
     temp
     test
@@ -302,6 +304,7 @@ Full list of builtin execution modules
     udev
     upstart
     uptime
+    user
     useradd
     uwsgi
     varnish
@@ -309,6 +312,7 @@ Full list of builtin execution modules
     victorops
     virt
     virtualenv_mod
+    vsphere
     win_autoruns
     win_dacl
     win_disk

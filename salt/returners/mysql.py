@@ -92,7 +92,7 @@ Use the following mysql database schema:
     CREATE TABLE `salt_events` (
     `id` BIGINT NOT NULL AUTO_INCREMENT,
     `tag` varchar(255) NOT NULL,
-    `data` varchar(1024) NOT NULL,
+    `data` mediumtext NOT NULL,
     `alter_time` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     `master_id` varchar(255) NOT NULL,
     PRIMARY KEY (`id`),
@@ -295,6 +295,13 @@ def save_load(jid, load):
             # Without this try:except: we get tons of duplicate entry errors
             # which result in job returns not being stored properly
             pass
+
+
+def save_minions(jid, minions):  # pylint: disable=unused-argument
+    '''
+    Included for API consistency
+    '''
+    pass
 
 
 def get_load(jid):

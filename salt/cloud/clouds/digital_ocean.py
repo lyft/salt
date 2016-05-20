@@ -34,7 +34,7 @@ import pprint
 import logging
 import decimal
 
-# Import Salt Cloud Libs
+# Import Salt Libs
 import salt.utils.cloud
 import salt.config as config
 from salt.exceptions import (
@@ -44,6 +44,7 @@ from salt.exceptions import (
     SaltCloudExecutionFailure,
     SaltCloudExecutionTimeout
 )
+from salt.ext.six import string_types
 
 # Import Third Party Libs
 try:
@@ -207,6 +208,9 @@ def get_image(vm_):
     vm_image = config.get_cloud_config_value(
         'image', vm_, __opts__, search_global=False
     )
+    if not isinstance(vm_image, string_types):
+        vm_image = str(vm_image)
+
     for image in images:
         if vm_image in (images[image]['name'], images[image]['slug'], images[image]['id']):
             if images[image]['slug'] is not None:
@@ -269,7 +273,8 @@ def create(vm_):
         # Check for required profile parameters before sending any API calls.
         if vm_['profile'] and config.is_profile_configured(__opts__,
                                                            __active_provider_name__ or 'digital_ocean',
-                                                           vm_['profile']) is False:
+                                                           vm_['profile'],
+                                                           vm_=vm_) is False:
             return False
     except AttributeError:
         pass
@@ -834,6 +839,117 @@ def _list_nodes(full=False, for_output=False):
             fetch = False
 
     return ret
+
+
+def reboot(name, call=None):
+    '''
+    Reboot a droplet in DigitalOcean.
+
+    .. versionadded:: 2015.8.8
+
+    name
+        The name of the droplet to restart.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a reboot droplet_name
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The restart action must be called with -a or --action.'
+        )
+
+    data = show_instance(name, call='action')
+    if data.get('status') == 'off':
+        return {'success': True,
+                'action': 'stop',
+                'status': 'off',
+                'msg': 'Machine is already off.'}
+
+    ret = query(droplet_id=data['id'],
+                command='actions',
+                args={'type': 'reboot'},
+                http_method='post')
+
+    return {'success': True,
+            'action': ret['action']['type'],
+            'state': ret['action']['status']}
+
+
+def start(name, call=None):
+    '''
+    Start a droplet in DigitalOcean.
+
+    .. versionadded:: 2015.8.8
+
+    name
+        The name of the droplet to start.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a start droplet_name
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The start action must be called with -a or --action.'
+        )
+
+    data = show_instance(name, call='action')
+    if data.get('status') == 'active':
+        return {'success': True,
+                'action': 'start',
+                'status': 'active',
+                'msg': 'Machine is already running.'}
+
+    ret = query(droplet_id=data['id'],
+                command='actions',
+                args={'type': 'power_on'},
+                http_method='post')
+
+    return {'success': True,
+            'action': ret['action']['type'],
+            'state': ret['action']['status']}
+
+
+def stop(name, call=None):
+    '''
+    Stop a droplet in DigitalOcean.
+
+    .. versionadded:: 2015.8.8
+
+    name
+        The name of the droplet to stop.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt-cloud -a stop droplet_name
+    '''
+    if call != 'action':
+        raise SaltCloudSystemExit(
+            'The stop action must be called with -a or --action.'
+        )
+
+    data = show_instance(name, call='action')
+    if data.get('status') == 'off':
+        return {'success': True,
+                'action': 'stop',
+                'status': 'off',
+                'msg': 'Machine is already off.'}
+
+    ret = query(droplet_id=data['id'],
+                command='actions',
+                args={'type': 'shutdown'},
+                http_method='post')
+
+    return {'success': True,
+            'action': ret['action']['type'],
+            'state': ret['action']['status']}
 
 
 def _get_full_output(node, for_output=False):

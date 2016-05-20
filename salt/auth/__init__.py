@@ -211,12 +211,14 @@ class Authorize(object):
         Gather and create the authorization data sets
         '''
         auth_data = self.opts['external_auth']
+        merge_lists = self.opts['pillar_merge_lists']
 
         if 'django' in auth_data and '^model' in auth_data['django']:
             auth_from_django = salt.auth.django.retrieve_auth_entries()
             auth_data = salt.utils.dictupdate.merge(auth_data,
                                                     auth_from_django,
-                                                    strategy='list')
+                                                    strategy='list',
+                                                    merge_lists=merge_lists)
 
         #for auth_back in self.opts.get('external_auth_sources', []):
         #    fstr = '{0}.perms'.format(auth_back)
@@ -341,7 +343,7 @@ class Resolver(object):
         self.auth = salt.loader.auth(opts)
 
     def _send_token_request(self, load):
-        if self.opts['transport'] == 'zeromq':
+        if self.opts['transport'] in ('zeromq', 'tcp'):
             master_uri = 'tcp://' + salt.utils.ip_bracket(self.opts['interface']) + \
                          ':' + str(self.opts['ret_port'])
             channel = salt.transport.client.ReqChannel.factory(self.opts,

@@ -18,7 +18,6 @@ import salt.utils
 import salt.utils.templates
 import salt.utils.validate.net
 import salt.ext.six as six
-from salt.ext.six.moves import StringIO
 
 # Set up logging
 log = logging.getLogger(__name__)
@@ -276,9 +275,12 @@ def _parse_settings_bond_0(opts, iface, bond_def):
     if 'arp_ip_target' in opts:
         if isinstance(opts['arp_ip_target'], list):
             if 1 <= len(opts['arp_ip_target']) <= 16:
-                bond.update({'arp_ip_target': []})
+                bond.update({'arp_ip_target': ''})
                 for ip in opts['arp_ip_target']:  # pylint: disable=C0103
-                    bond['arp_ip_target'].append(ip)
+                    if len(bond['arp_ip_target']) > 0:
+                        bond['arp_ip_target'] = bond['arp_ip_target'] + ',' + ip
+                    else:
+                        bond['arp_ip_target'] = ip
             else:
                 _raise_error_iface(iface, 'arp_ip_target', valid)
         else:
@@ -322,9 +324,9 @@ def _parse_settings_bond_1(opts, iface, bond_def):
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
-            bond.update({'use_carrier': 'on'})
+            bond.update({'use_carrier': '1'})
         elif opts['use_carrier'] in _CONFIG_FALSE:
-            bond.update({'use_carrier': 'off'})
+            bond.update({'use_carrier': '0'})
         else:
             valid = _CONFIG_TRUE + _CONFIG_FALSE
             _raise_error_iface(iface, 'use_carrier', valid)
@@ -349,9 +351,12 @@ def _parse_settings_bond_2(opts, iface, bond_def):
     if 'arp_ip_target' in opts:
         if isinstance(opts['arp_ip_target'], list):
             if 1 <= len(opts['arp_ip_target']) <= 16:
-                bond.update({'arp_ip_target': []})
+                bond.update({'arp_ip_target': ''})
                 for ip in opts['arp_ip_target']:  # pylint: disable=C0103
-                    bond['arp_ip_target'].append(ip)
+                    if len(bond['arp_ip_target']) > 0:
+                        bond['arp_ip_target'] = bond['arp_ip_target'] + ',' + ip
+                    else:
+                        bond['arp_ip_target'] = ip
             else:
                 _raise_error_iface(iface, 'arp_ip_target', valid)
         else:
@@ -405,9 +410,9 @@ def _parse_settings_bond_3(opts, iface, bond_def):
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
-            bond.update({'use_carrier': 'on'})
+            bond.update({'use_carrier': '1'})
         elif opts['use_carrier'] in _CONFIG_FALSE:
-            bond.update({'use_carrier': 'off'})
+            bond.update({'use_carrier': '0'})
         else:
             valid = _CONFIG_TRUE + _CONFIG_FALSE
             _raise_error_iface(iface, 'use_carrier', valid)
@@ -449,9 +454,9 @@ def _parse_settings_bond_4(opts, iface, bond_def):
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
-            bond.update({'use_carrier': 'on'})
+            bond.update({'use_carrier': '1'})
         elif opts['use_carrier'] in _CONFIG_FALSE:
-            bond.update({'use_carrier': 'off'})
+            bond.update({'use_carrier': '0'})
         else:
             valid = _CONFIG_TRUE + _CONFIG_FALSE
             _raise_error_iface(iface, 'use_carrier', valid)
@@ -492,9 +497,9 @@ def _parse_settings_bond_5(opts, iface, bond_def):
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
-            bond.update({'use_carrier': 'on'})
+            bond.update({'use_carrier': '1'})
         elif opts['use_carrier'] in _CONFIG_FALSE:
-            bond.update({'use_carrier': 'off'})
+            bond.update({'use_carrier': '0'})
         else:
             valid = _CONFIG_TRUE + _CONFIG_FALSE
             _raise_error_iface(iface, 'use_carrier', valid)
@@ -528,9 +533,9 @@ def _parse_settings_bond_6(opts, iface, bond_def):
 
     if 'use_carrier' in opts:
         if opts['use_carrier'] in _CONFIG_TRUE:
-            bond.update({'use_carrier': 'on'})
+            bond.update({'use_carrier': '1'})
         elif opts['use_carrier'] in _CONFIG_FALSE:
-            bond.update({'use_carrier': 'off'})
+            bond.update({'use_carrier': '0'})
         else:
             valid = _CONFIG_TRUE + _CONFIG_FALSE
             _raise_error_iface(iface, 'use_carrier', valid)
@@ -561,7 +566,7 @@ def _parse_settings_eth(opts, iface_type, enabled, iface):
     if 'mtu' in opts:
         try:
             result['mtu'] = int(opts['mtu'])
-        except Exception:
+        except ValueError:
             _raise_error_iface(iface, 'mtu', ['integer'])
 
     if iface_type not in ['bridge']:
@@ -632,12 +637,9 @@ def _parse_settings_eth(opts, iface_type, enabled, iface):
         if opt in opts:
             result[opt] = opts[opt]
 
-    if 'mtu' in opts:
-        try:
-            int(opts['mtu'])
-            result['mtu'] = opts['mtu']
-        except Exception:
-            _raise_error_iface(iface, 'mtu', ['integer'])
+    for opt in ['ipaddrs', 'ipv6addrs']:
+        if opt in opts:
+            result[opt] = opts[opt]
 
     if 'ipv6_autoconf' in opts:
         result['ipv6_autoconf'] = opts['ipv6_autoconf']
@@ -811,7 +813,12 @@ def _read_file(path):
     try:
         with salt.utils.fopen(path, 'rb') as contents:
             # without newlines character. http://stackoverflow.com/questions/12330522/reading-a-file-without-newlines
-            return contents.read().splitlines()
+            lines = contents.read().splitlines()
+            try:
+                lines.remove('')
+            except ValueError:
+                pass
+            return lines
     except Exception:
         return []  # Return empty list for type consistency
 
@@ -841,12 +848,12 @@ def _write_file_network(data, filename):
 
 
 def _read_temp(data):
-    tout = StringIO()
-    tout.write(data)
-    tout.seek(0)
-    output = tout.read().splitlines()  # Discard newlines
-    tout.close()
-    return output
+    lines = data.splitlines()
+    try:  # Discard newlines if they exist
+        lines.remove('')
+    except ValueError:
+        pass
+    return lines
 
 
 def build_bond(iface, **settings):
@@ -957,8 +964,11 @@ def build_routes(iface, **settings):
     '''
 
     template = 'rh6_route_eth.jinja'
-    if __grains__['osrelease'][0] < 6:
-        template = 'route_eth.jinja'
+    try:
+        if int(__grains__['osrelease'][0]) < 6:
+            template = 'route_eth.jinja'
+    except ValueError:
+        pass
     log.debug('Template name: ' + template)
 
     iface = iface.lower()

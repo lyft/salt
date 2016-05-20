@@ -70,6 +70,8 @@ passed in as a dict, or as a string to pull from pillars or minion config:
                   ttl: 60
                 - name: myothercname.example.com.
                   zone: example.com.
+            - security_groups:
+                - my-security-group
 
     # Using a profile from pillars
     Ensure myelb ELB exists:
@@ -229,10 +231,10 @@ def present(
         profile=None,
         wait_for_sync=True):
     '''
-    Ensure the IAM role exists.
+    Ensure the ELB exists.
 
     name
-        Name of the IAM role.
+        Name of the ELB.
 
     availability_zones
         A list of availability zones for this ELB.
@@ -240,39 +242,65 @@ def present(
     listeners
         A list of listener lists; example::
 
-        [
-            ['443', 'HTTPS', 'arn:aws:iam::1111111:server-certificate/mycert'],
-            ['8443', '80', 'HTTPS', 'HTTP', 'arn:aws:iam::1111111:server-certificate/mycert']
-        ]
+            [
+                ['443', 'HTTPS', 'arn:aws:iam::1111111:server-certificate/mycert'],
+                ['8443', '80', 'HTTPS', 'HTTP', 'arn:aws:iam::1111111:server-certificate/mycert']
+            ]
 
     subnets
         A list of subnet IDs in your VPC to attach to your LoadBalancer.
 
     security_groups
-        The security groups assigned to your LoadBalancer within your VPC.
+        The security groups assigned to your LoadBalancer within your VPC. Must
+        be passed either as a list or a comma-separated string.
+
+        For example, a list:
+
+        .. code-block:: yaml
+
+            - security_groups:
+              - secgroup-one
+              - secgroup-two
+
+        Or as a comma-separated string:
+
+        .. code-block:: yaml
+
+            - security_groups: secgroup-one,secgroup-two
 
     scheme
-        The type of a LoadBalancer. internet-facing or internal. Once set, can not be modified.
+        The type of a LoadBalancer, ``internet-facing`` or ``internal``. Once
+        set, can not be modified.
 
     health_check
         A dict defining the health check for this ELB.
 
     attributes
         A dict defining the attributes to set on this ELB.
+        Unknown keys will be silently ignored.
+
+        See the :mod:`salt.modules.boto_elb.set_attributes` function for
+        recognized attributes.
 
     attributes_from_pillar
         name of pillar dict that contains attributes.   Attributes defined for this specific
         state will override those from pillar.
 
     cnames
-        A list of cname dicts with attributes: name, zone, ttl, and identifier.
-        See the boto_route53 state for information about these attributes.
+        An optional list of cname dicts with attributes: name, zone, ttl, and
+        identifier. If specified, a CNAME record will be created referencing
+        this ELB's public FQDN.
+
+        See the :mod:`salt.states.boto_route53` state for information about
+        these attributes.
 
     alarms:
         a dictionary of name->boto_cloudwatch_alarm sections to be associated with this ELB.
         All attributes should be specified except for dimension which will be
         automatically set to this ELB.
-        See the boto_cloudwatch_alarm state for information about these attributes.
+
+        See the :mod:`salt.states.boto_cloudwatch_alarm` state for information
+        about these attributes.
 
     alarms_from_pillar:
         name of pillar dict that contains alarm settings.   Alarms defined for this specific
@@ -303,6 +331,16 @@ def present(
         attributes = tmp
 
     ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
+
+    if security_groups:
+        if isinstance(security_groups, six.string_types):
+            security_groups = security_groups.split(',')
+        elif not isinstance(security_groups, list):
+            ret['result'] = False
+            ret['comment'] = 'The \'security_group\' parameter must either be a list or ' \
+                             'a comma-separated string.'
+            return ret
+
     _ret = _elb_present(name, availability_zones, listeners, subnets,
                         security_groups, scheme, region, key, keyid, profile)
     ret['changes'] = _ret['changes']
@@ -334,27 +372,27 @@ def present(
         lb = __salt__['boto_elb.get_elb_config'](
             name, region, key, keyid, profile
         )
-        for cname in cnames:
-            _ret = __salt__['state.single'](
-                'boto_route53.present',
-                name=cname.get('name'),
-                value=lb['dns_name'],
-                zone=cname.get('zone'),
-                record_type='CNAME',
-                identifier=cname.get('identifier', None),
-                ttl=cname.get('ttl', None),
-                region=region,
-                key=key,
-                keyid=keyid,
-                profile=profile
-            )
-            _ret = _ret.values()[0]
-            ret['changes'] = dictupdate.update(ret['changes'], _ret['changes'])
-            ret['comment'] = ' '.join([ret['comment'], _ret['comment']])
-            if not _ret['result']:
-                ret['result'] = _ret['result']
-                if ret['result'] is False:
-                    return ret
+        if len(lb) > 0:
+            for cname in cnames:
+                _ret = __states__['boto_route53.present'](
+                    name=cname.get('name'),
+                    value=lb['dns_name'],
+                    zone=cname.get('zone'),
+                    record_type='CNAME',
+                    identifier=cname.get('identifier', None),
+                    ttl=cname.get('ttl', None),
+                    region=region,
+                    key=key,
+                    keyid=keyid,
+                    profile=profile,
+                    wait_for_sync=wait_for_sync
+                )
+                ret['changes'] = dictupdate.update(ret['changes'], _ret['changes'])
+                ret['comment'] = ' '.join([ret['comment'], _ret['comment']])
+                if not _ret['result']:
+                    ret['result'] = _ret['result']
+                    if ret['result'] is False:
+                        return ret
     _ret = _alarms_present(name, alarms, alarms_from_pillar, region, key, keyid, profile)
     ret['changes'] = dictupdate.update(ret['changes'], _ret['changes'])
     ret['comment'] = ' '.join([ret['comment'], _ret['comment']])
@@ -368,7 +406,17 @@ def present(
 def register_instances(name, instances, region=None, key=None, keyid=None,
                        profile=None):
     '''
-    Add instance/s to load balancer
+    Add EC2 instance(s) to an Elastic Load Balancer. Removing an instance from
+    the ``instances`` list does not remove it from the ELB.
+
+    name
+        The name of the Elastic Load Balancer to add EC2 instances to.
+
+    instances
+        A list of EC2 instance IDs that this Elastic Load Balancer should
+        distribute traffic to. This state will only ever append new instances
+        to the ELB. EC2 instances already associated with this ELB will not be
+        removed if they are not in the ``instances`` list.
 
     .. versionadded:: 2015.8.0
 
@@ -382,7 +430,6 @@ def register_instances(name, instances, region=None, key=None, keyid=None,
               - instance-id2
     '''
     ret = {'name': name, 'result': None, 'comment': '', 'changes': {}}
-    ret['name'] = name
     lb = __salt__['boto_elb.exists'](name, region, key, keyid, profile)
     if lb:
         health = __salt__['boto_elb.get_instance_health'](name,
@@ -479,11 +526,13 @@ def _elb_present(
         vpc_id = __salt__['boto_vpc.get_subnet_association'](
             subnets, region, key, keyid, profile
         )
+        vpc_id = vpc_id.get('vpc_id')
         if not vpc_id:
             msg = 'Subnets {0} do not map to a valid vpc id.'.format(subnets)
             raise SaltInvocationError(msg)
         security_groups = __salt__['boto_secgroup.convert_to_group_ids'](
-            security_groups, vpc_id, region, key, keyid, profile
+            security_groups, vpc_id, region=region, key=key, keyid=keyid,
+            profile=profile
         )
         if not security_groups:
             msg = 'Security groups {0} do not map to valid security group ids.'
@@ -912,9 +961,8 @@ def _alarms_present(name, alarms, alarms_from_pillar, region, key, keyid, profil
             "keyid": keyid,
             "profile": profile,
         }
-        ret = __salt__["state.single"]('boto_cloudwatch_alarm.present', **kwargs)
-        results = next(six.itervalues(ret))
-        if not results["result"]:
+        results = __states__['boto_cloudwatch_alarm.present'](**kwargs)
+        if not results.get('result'):
             merged_return_value["result"] = results["result"]
         if results.get("changes", {}) != {}:
             merged_return_value["changes"][info["name"]] = results["changes"]

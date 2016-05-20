@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 '''
-Manage IAM roles.
-=================
+Manage IAM objects
+==================
 
 .. versionadded:: 2015.8.0
 
@@ -100,7 +100,8 @@ passed in as a dict, or as a string to pull from pillars or minion config:
       boto_iam.server_cert_absent:
         - name: mycert
 
-. code-block:: yaml
+.. code-block:: yaml
+
     create keys for user:
       boto_iam.keys_present:
         - name: myusername
@@ -116,7 +117,6 @@ from __future__ import absolute_import
 import logging
 import json
 import os
-import xml.etree.cElementTree as xml
 
 # Import Salt Libs
 import salt.utils
@@ -126,14 +126,29 @@ import salt.ext.six as six
 from salt.ext.six import string_types
 from salt.ext.six.moves import range  # pylint: disable=import-error,redefined-builtin
 
+# Import 3rd party libs
+try:
+    from salt._compat import ElementTree as ET
+    HAS_ELEMENT_TREE = True
+except ImportError:
+    HAS_ELEMENT_TREE = False
+
 log = logging.getLogger(__name__)
+
+__virtualname__ = 'boto_iam'
 
 
 def __virtual__():
     '''
-    Only load if boto is available.
+    Only load if elementtree xml library and boto are available.
     '''
-    return 'boto_iam.get_user' in __salt__
+    if not HAS_ELEMENT_TREE:
+        return (False, 'Cannot load {0} state: ElementTree library unavailable'.format(__virtualname__))
+
+    if 'boto_iam.get_user' in __salt__:
+        return True
+    else:
+        return (False, 'Cannot load {0} state: boto_iam module unavailable'.format(__virtualname__))
 
 
 def user_absent(name, delete_keys=None, region=None, key=None, keyid=None, profile=None):
@@ -164,7 +179,7 @@ def user_absent(name, delete_keys=None, region=None, key=None, keyid=None, profi
         ret['result'] = True
         ret['comment'] = 'IAM User {0} does not exist.'.format(name)
         return ret
-    if 'true' == str(delete_keys).lower:
+    if 'true' == str(delete_keys).lower():
         keys = __salt__['boto_iam.get_all_access_keys'](user_name=name, region=region, key=key,
                                                         keyid=keyid, profile=profile)
         log.debug('Keys for user {0} are {1}.'.format(name, keys))
@@ -175,9 +190,7 @@ def user_absent(name, delete_keys=None, region=None, key=None, keyid=None, profi
                     ret['comment'] = 'Access key {0} is set to be deleted.'.format(k['access_key_id'])
                     ret['result'] = None
                     return ret
-                if _delete_key(k['access_key_id'], name, region, key, keyid, profile):
-                    ret['comment'] = os.linesep.join([ret['comment'], 'Key {0} has been deleted.'.format(k['access_key_id'])])
-                    ret['changes'][k['access_key_id']] = 'deleted'
+                ret = _delete_key(ret, k['access_key_id'], name, region, key, keyid, profile)
     if __opts__['test']:
         ret['comment'] = 'IAM user {0} is set to be deleted.'.format(name)
         ret['result'] = None
@@ -363,7 +376,9 @@ def user_present(name, policies=None, policies_from_pillars=None, password=None,
         The password for the new user. Must comply with account policy.
 
     path (string)
-        The path of the user. Default is '/'
+        The path of the user. Default is '/'.
+
+        .. versionadded:: 2015.8.2
 
     region (string)
         Region to connect to.
@@ -498,12 +513,15 @@ def _case_password(ret, name, password, region=None, key=None, keyid=None, profi
     return ret
 
 
-def group_present(name, policies=None, policies_from_pillars=None, users=None, region=None, key=None, keyid=None, profile=None):
+def group_present(name, policies=None, policies_from_pillars=None, users=None, region=None, key=None, keyid=None, profile=None, path='/'):
     '''
     Ensure the IAM group is present
 
     name (string)
         The name of the new group.
+
+    path (string)
+        The path for the group, defaults to '/'
 
     policies (dict)
         A dict of IAM group policy documents.
@@ -549,7 +567,7 @@ def group_present(name, policies=None, policies_from_pillars=None, users=None, r
             ret['comment'] = 'IAM group {0} is set to be created.'.format(name)
             ret['result'] = None
             return ret
-        created = __salt__['boto_iam.create_group'](group_name=name, region=region, key=key, keyid=keyid, profile=profile)
+        created = __salt__['boto_iam.create_group'](group_name=name, path=path, region=region, key=key, keyid=keyid, profile=profile)
         if not created:
             ret['comment'] = 'Failed to create IAM group {0}.'.format(name)
             ret['result'] = False
@@ -567,7 +585,7 @@ def group_present(name, policies=None, policies_from_pillars=None, users=None, r
     if not _ret['result']:
         ret['result'] = _ret['result']
         return ret
-    if users:
+    if users is not None:
         log.debug('Users are : {0}.'.format(users))
         group_result = __salt__['boto_iam.get_group'](group_name=name, region=region, key=key, keyid=keyid, profile=profile)
         ret = _case_group(ret, users, name, group_result, region, key, keyid, profile)
@@ -591,7 +609,7 @@ def _case_group(ret, users, group_name, group_result, region, key, keyid, profil
                 ret['comment'] = 'User {0} is set to be added to group {1}.'.format(user, group_name)
                 ret['result'] = None
             else:
-                __salt__['boto_iam.add_user_to_group'](user, group_name, region, key, keyid, profile)
+                addret = __salt__['boto_iam.add_user_to_group'](user, group_name, region=region, key=key, keyid=keyid, profile=profile)
                 ret['comment'] = os.linesep.join([ret['comment'], 'User {0} has been added to group {1}.'.format(user, group_name)])
                 ret['changes'][user] = group_name
     for user in _users:
@@ -600,8 +618,8 @@ def _case_group(ret, users, group_name, group_result, region, key, keyid, profil
                 ret['comment'] = os.linesep.join([ret['comment'], 'User {0} is set to be removed from group {1}.'.format(user, group_name)])
                 ret['result'] = None
             else:
-                __salt__['boto_iam.remove_user_from_group'](group_name=group_name, user_name=user, region=region,
-                                                            key=key, keyid=keyid, profile=profile)
+                remret = __salt__['boto_iam.remove_user_from_group'](group_name=group_name, user_name=user, region=region,
+                                                                     key=key, keyid=keyid, profile=profile)
                 ret['comment'] = os.linesep.join([ret['comment'], 'User {0} has been removed from group {1}.'.format(user, group_name)])
                 ret['changes'][user] = 'Removed from group {0}.'.format(group_name)
     return ret
@@ -892,7 +910,7 @@ def server_cert_present(name, public_key, private_key, cert_chain=None, path=Non
 def _get_error(error):
     # Converts boto exception to string that can be used to output error.
     error = '\n'.join(error.split('\n')[1:])
-    error = xml.fromstring(error)
+    error = ET.fromstring(error)
     code = error[0][1].text
     message = error[0][2].text
     return code, message

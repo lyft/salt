@@ -2,6 +2,12 @@
 '''
 Support for ``pkgng``, the new package manager for FreeBSD
 
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
+
 .. warning::
 
     This module has been completely rewritten. Up to and including version
@@ -51,9 +57,12 @@ __virtualname__ = 'pkg'
 def __virtual__():
     '''
     Load as 'pkg' on FreeBSD 10 and greater.
+    Load as 'pkg' on DragonFly BSD.
     Load as 'pkg' on FreeBSD 9 when config option
     ``providers:pkg`` is set to 'pkgng'.
     '''
+    if __grains__['kernel'] == 'DragonFly':
+        return __virtualname__
     if __grains__['os'] == 'FreeBSD' and float(__grains__['osrelease']) >= 10:
         return __virtualname__
     if __grains__['os'] == 'FreeBSD' and \
@@ -80,6 +89,13 @@ def _pkg(jail=None, chroot=None):
     elif chroot:
         ret += ' -c {0!r}'.format(chroot)
     return ret
+
+
+def _get_pkgng_version(jail=None, chroot=None):
+    '''
+    return the version of 'pkg'
+    '''
+    return __salt__['cmd.run']([_pkg(jail, chroot), '--version']).strip()
 
 
 def _get_version(name, results):
@@ -186,7 +202,7 @@ def version(*names, **kwargs):
     ])
 
 # Support pkg.info get version info, since this is the CLI usage
-info = version
+info = salt.utils.alias_function(version, 'info')
 
 
 def refresh_db(jail=None, chroot=None, force=False):
@@ -230,7 +246,7 @@ def refresh_db(jail=None, chroot=None, force=False):
 
 
 # Support pkg.update to refresh the db, since this is the CLI usage
-update = refresh_db
+update = salt.utils.alias_function(refresh_db, 'update')
 
 
 def latest_version(*names, **kwargs):
@@ -253,6 +269,7 @@ def latest_version(*names, **kwargs):
     if len(names) == 0:
         return ''
     ret = {}
+
     # Initialize the dict with empty strings
     for name in names:
         ret[name] = ''
@@ -260,12 +277,29 @@ def latest_version(*names, **kwargs):
     chroot = kwargs.get('chroot')
     pkgs = list_pkgs(versions_as_list=True, jail=jail, chroot=chroot)
 
+    if salt.utils.compare_versions(_get_pkgng_version(jail, chroot), '>=', '1.6.0'):
+        quiet = True
+    else:
+        quiet = False
+
     for name in names:
-        cmd = '{0} search {1}'.format(_pkg(jail, chroot), name)
+        # FreeBSD supports packages in format java/openjdk7
+        if '/' in name:
+            cmd = [_pkg(jail, chroot), 'search']
+        else:
+            cmd = [_pkg(jail, chroot), 'search', '-S', 'name', '-Q', 'version', '-e']
+        if quiet:
+            cmd.append('-q')
+        cmd.append(name)
+
         pkgver = _get_version(
             name,
-            __salt__['cmd.run'](cmd, python_shell=False, output_loglevel='trace')
+            sorted(
+                __salt__['cmd.run'](cmd, python_shell=False, output_loglevel='trace').splitlines(),
+                reverse=True
+            ).pop(0)
         )
+
         if pkgver is not None:
             installed = pkgs.get(name, [])
             if not installed:
@@ -286,7 +320,7 @@ def latest_version(*names, **kwargs):
 
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def list_pkgs(versions_as_list=False,
@@ -725,7 +759,7 @@ def install(name=None,
     if pkg_params is None or len(pkg_params) == 0:
         return {}
 
-    opts = ''
+    opts = 'y'
     repo_opts = ''
     if salt.utils.is_true(orphan):
         opts += 'A'
@@ -737,8 +771,6 @@ def install(name=None,
         opts += 'U'
     if salt.utils.is_true(dryrun):
         opts += 'n'
-    if not salt.utils.is_true(dryrun):
-        opts += 'y'
     if salt.utils.is_true(quiet):
         opts += 'q'
     if salt.utils.is_true(reinstall_requires):
@@ -940,15 +972,15 @@ def remove(name=None,
     return salt.utils.compare_dicts(old, new)
 
 # Support pkg.delete to remove packages, since this is the CLI usage
-delete = remove
+delete = salt.utils.alias_function(remove, 'delete')
 # No equivalent to purge packages, use remove instead
-purge = remove
+purge = salt.utils.alias_function(remove, 'purge')
 
 
 def upgrade(*names, **kwargs):
     '''
     Upgrade named or all packages (run a ``pkg upgrade``). If <package name> is
-    ommitted, the operation is executed on all packages.
+    omitted, the operation is executed on all packages.
 
     CLI Example:
 

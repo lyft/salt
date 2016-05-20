@@ -2,6 +2,12 @@
 '''
 A module to manage software on Windows
 
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
+
 :depends:   - win32com
             - win32con
             - win32api
@@ -14,6 +20,7 @@ import errno
 import os
 import locale
 import logging
+import time
 from distutils.version import LooseVersion  # pylint: disable=import-error,no-name-in-module
 
 # Import third party libs
@@ -116,7 +123,7 @@ def latest_version(*names, **kwargs):
     return ret
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def upgrade_available(name):
@@ -235,9 +242,19 @@ def list_pkgs(versions_as_list=False, **kwargs):
 
     ret = {}
     name_map = _get_name_map()
-    for key, val in six.iteritems(_get_reg_software()):
-        if key in name_map:
-            key = name_map[key]
+    for pkg_name, val in six.iteritems(_get_reg_software()):
+        if pkg_name in name_map:
+            key = name_map[pkg_name]
+            if val in ['Not Found', None, False]:
+                # Look up version from winrepo
+                pkg_info = _get_package_info(key)
+                if not pkg_info:
+                    continue
+                for pkg_ver in pkg_info.keys():
+                    if pkg_info[pkg_ver]['full_name'] == pkg_name:
+                        val = pkg_ver
+        else:
+            key = pkg_name
         __salt__['pkg_resource.add_pkg'](ret, key, val)
 
     __salt__['pkg_resource.sort_pkglist'](ret)
@@ -382,6 +399,13 @@ def refresh_db(saltenv='base'):
     else:
         winrepo_source_dir = __opts__['winrepo_source_dir']
 
+    # Clear minion repo-ng cache
+    repo_path = '{0}\\files\\{1}\\win\\repo-ng\\salt-winrepo-ng'\
+        .format(__opts__['cachedir'], saltenv)
+    if not __salt__['file.remove'](repo_path):
+        log.error('pkg.refresh_db: failed to clear existing cache')
+
+    # Cache repo-ng locally
     cached_files = __salt__['cp.cache_dir'](
         winrepo_source_dir,
         saltenv,
@@ -545,6 +569,7 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
 
     # Loop through each package
     changed = []
+    latest = []
     for pkg_name, options in six.iteritems(pkg_params):
 
         # Load package information for the package
@@ -577,6 +602,9 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
                       '{1}'.format(version_num, pkg_name))
             ret[pkg_name] = {'not found': version_num}
             continue
+
+        if 'latest' in pkginfo:
+            latest.append(pkg_name)
 
         # Get the installer
         installer = pkginfo[version_num].get('installer')
@@ -635,48 +663,95 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
         cached_pkg = cached_pkg.replace('/', '\\')
         cache_path, _ = os.path.split(cached_pkg)
 
-        # Get settings for msiexec and allusers
-        msiexec = pkginfo[version_num].get('msiexec')
-        all_users = pkginfo[version_num].get('allusers')
-
-        # all_users defaults to True
-        if all_users is None:
-            all_users = True
-
         # Get install flags
         install_flags = '{0}'.format(pkginfo[version_num].get('install_flags'))
         if options and options.get('extra_install_flags'):
             install_flags = '{0} {1}'.format(install_flags,
                                              options.get('extra_install_flags', ''))
 
-        # Build the install command
-        cmd = []
-        if msiexec:
-            cmd.extend(['msiexec', '/i'])
-        cmd.append(cached_pkg)
-        cmd.extend(shlex.split(install_flags))
-        if msiexec and all_users:
-            cmd.append('ALLUSERS="1"')
-
         # Install the software
-        result = __salt__['cmd.run_stdout'](cmd, cache_path, output_loglevel='trace', python_shell=False)
-        if result:
-            log.error('Failed to install {0}'.format(pkg_name))
-            log.error('error message: {0}'.format(result))
-            ret[pkg_name] = {'failed': result}
+        # Check Use Scheduler Option
+        if pkginfo[version_num].get('use_scheduler', False):
+
+            # Build Scheduled Task Parameters
+            if pkginfo[version_num].get('msiexec'):
+                cmd = 'msiexec.exe'
+                arguments = ['/i', cached_pkg]
+                if pkginfo['version_num'].get('allusers', True):
+                    arguments.append('ALLUSERS="1"')
+                arguments.extend(shlex.split(install_flags))
+            else:
+                cmd = cached_pkg
+                arguments = shlex.split(install_flags)
+
+            # Create Scheduled Task
+            __salt__['task.create_task'](name='update-salt-software',
+                                         user_name='System',
+                                         force=True,
+                                         action_type='Execute',
+                                         cmd=cmd,
+                                         arguments=' '.join(arguments),
+                                         start_in=cache_path,
+                                         trigger_type='Once',
+                                         start_date='1975-01-01',
+                                         start_time='01:00')
+            # Run Scheduled Task
+            __salt__['task.run_wait'](name='update-salt-software')
         else:
-            changed.append(pkg_name)
+            # Build the install command
+            cmd = []
+            if pkginfo[version_num].get('msiexec'):
+                cmd.extend(['msiexec', '/i', cached_pkg])
+                if pkginfo[version_num].get('allusers', True):
+                    cmd.append('ALLUSERS="1"')
+            else:
+                cmd.append(cached_pkg)
+            cmd.extend(shlex.split(install_flags))
+            # Launch the command
+            result = __salt__['cmd.run_stdout'](cmd,
+                                                cache_path,
+                                                output_loglevel='trace',
+                                                python_shell=False)
+            if result:
+                log.error('Failed to install {0}'.format(pkg_name))
+                log.error('error message: {0}'.format(result))
+                ret[pkg_name] = {'failed': result}
+            else:
+                changed.append(pkg_name)
 
     # Get a new list of installed software
     new = list_pkgs()
+
+    # For installers that have no specific version (ie: chrome)
+    # The software definition file will have a version of 'latest'
+    # In that case there's no way to know which version has been installed
+    # Just return the current installed version
+    # This has to be done before the loop below, otherwise the installation
+    # will not be detected
+    if latest:
+        for pkg_name in latest:
+            if old.get(pkg_name, 'old') == new.get(pkg_name, 'new'):
+                ret[pkg_name] = {'current': new[pkg_name]}
+
+    # Sometimes the installer takes awhile to update the registry
+    # This checks 10 times, 3 seconds between each for a registry change
     tries = 0
     difference = salt.utils.compare_dicts(old, new)
-    while not all(name in difference for name in changed) and tries <= 1000:
+    while not all(name in difference for name in changed) and tries < 10:
+        __salt__['reg.broadcast_change']()
+        time.sleep(3)
         new = list_pkgs()
         difference = salt.utils.compare_dicts(old, new)
         tries += 1
-        if tries == 1000:
-            ret['_comment'] = 'Registry not updated.'
+        log.debug("Try {0}".format(tries))
+        if tries == 10:
+            if not latest:
+                ret['_comment'] = 'Software not found in the registry.\n' \
+                                  'Could be a problem with the Software\n' \
+                                  'definition file. Verify the full_name\n' \
+                                  'and the version match the registry ' \
+                                  'exactly.\n' \
+                                  'Failed after {0} tries.'.format(tries)
 
     # Compare the software list before and after
     # Add the difference to ret
@@ -784,6 +859,9 @@ def remove(name=None, pkgs=None, version=None, **kwargs):
         else:
             version_num = version
 
+        if 'latest' in pkginfo and version_num not in pkginfo:
+            version_num = 'latest'
+
         # Check to see if package is installed on the system
         if target not in old:
             log.error('{0} {1} not installed'.format(target, version))
@@ -791,7 +869,8 @@ def remove(name=None, pkgs=None, version=None, **kwargs):
             continue
         else:
             if not version_num == old.get(target) \
-                    and not old.get(target) == "Not Found":
+                    and not old.get(target) == "Not Found" \
+                    and version_num != 'latest':
                 log.error('{0} {1} not installed'.format(target, version))
                 ret[target] = {'current': '{0} not installed'.format(version_num)}
                 continue
@@ -829,33 +908,61 @@ def remove(name=None, pkgs=None, version=None, **kwargs):
 
         # Fix non-windows slashes
         cached_pkg = cached_pkg.replace('/', '\\')
+        cache_path, _ = os.path.split(cached_pkg)
 
         # Get parameters for cmd
         expanded_cached_pkg = str(os.path.expandvars(cached_pkg))
 
-        uninstall_flags = ''
-        if pkginfo[version_num].get('uninstall_flags'):
-            uninstall_flags = '{0}'.format(pkginfo[version_num].get('uninstall_flags'))
-
+        # Get uninstall flags
+        uninstall_flags = '{0}'.format(pkginfo[version_num].get('uninstall_flags', ''))
         if kwargs.get('extra_uninstall_flags'):
             uninstall_flags = '{0} {1}'.format(uninstall_flags,
                                                kwargs.get('extra_uninstall_flags', ""))
 
-        # Build the install command
-        cmd = []
-        if pkginfo[version_num].get('msiexec'):
-            cmd.extend(['msiexec', '/x'])
-        cmd.append(expanded_cached_pkg)
-        cmd.extend(shlex.split(uninstall_flags))
-
         # Uninstall the software
-        result = __salt__['cmd.run_stdout'](cmd, output_loglevel='trace', python_shell=False)
-        if result:
-            log.error('Failed to install {0}'.format(target))
-            log.error('error message: {0}'.format(result))
-            ret[target] = {'failed': result}
+        # Check Use Scheduler Option
+        if pkginfo[version_num].get('use_scheduler', False):
+
+            # Build Scheduled Task Parameters
+            if pkginfo[version_num].get('msiexec'):
+                cmd = 'msiexec.exe'
+                arguments = ['/x']
+                arguments.extend(shlex.split(uninstall_flags))
+            else:
+                cmd = expanded_cached_pkg
+                arguments = shlex.split(uninstall_flags)
+
+            # Create Scheduled Task
+            __salt__['task.create_task'](name='update-salt-software',
+                                         user_name='System',
+                                         force=True,
+                                         action_type='Execute',
+                                         cmd=cmd,
+                                         arguments=' '.join(arguments),
+                                         start_in=cache_path,
+                                         trigger_type='Once',
+                                         start_date='1975-01-01',
+                                         start_time='01:00')
+            # Run Scheduled Task
+            __salt__['task.run_wait'](name='update-salt-software')
         else:
-            changed.append(target)
+            # Build the install command
+            cmd = []
+            if pkginfo[version_num].get('msiexec'):
+                cmd.extend(['msiexec', '/x', expanded_cached_pkg])
+            else:
+                cmd.append(expanded_cached_pkg)
+            cmd.extend(shlex.split(uninstall_flags))
+            # Launch the command
+            result = __salt__['cmd.run_stdout'](cmd,
+                                                output_loglevel='trace',
+                                                python_shell=False)
+            if result:
+                log.error('Failed to install {0}'.format(target))
+                log.error('error message: {0}'.format(result))
+                ret[target] = {'failed': result}
+            else:
+                changed.append(target)
 
     # Get a new list of installed software
     new = list_pkgs()

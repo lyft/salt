@@ -2,6 +2,12 @@
 '''
 A module to wrap pacman calls, since Arch is the best
 (https://wiki.archlinux.org/index.php/Arch_is_the_best)
+
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
 '''
 
 # Import python libs
@@ -27,7 +33,7 @@ def __virtual__():
     '''
     Set the virtual pkg module if the os is Arch
     '''
-    if __grains__['os'] in ('Arch', 'Arch ARM'):
+    if __grains__['os'] in ('Arch', 'Arch ARM', 'ManjaroLinux'):
         return __virtualname__
     return False
 
@@ -96,7 +102,7 @@ def latest_version(*names, **kwargs):
     return ret
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def upgrade_available(name):
@@ -384,7 +390,7 @@ def install(name=None,
     return salt.utils.compare_dicts(old, new)
 
 
-def upgrade(refresh=False):
+def upgrade(refresh=False, **kwargs):
     '''
     Run a full system upgrade, a pacman -Syu
 

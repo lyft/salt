@@ -4,9 +4,9 @@ Provide the service module for the proxy-minion REST sample
 '''
 # Import python libs
 from __future__ import absolute_import
-import logging
+import salt.utils
 
-__proxyenabled__ = ['rest_sample']
+import logging
 
 log = logging.getLogger(__name__)
 
@@ -23,9 +23,13 @@ def __virtual__():
     '''
     Only work on systems that are a proxy minion
     '''
-    if __grains__['os'] == 'proxy':
-        return __virtualname__
-    return False
+    try:
+        if salt.utils.is_proxy() and __opts__['proxy']['proxytype'] == 'rest_sample':
+            return __virtualname__
+    except KeyError:
+        return (False, 'The rest_service execution module failed to load.  Check the proxy key in pillar.')
+
+    return (False, 'The rest_service execution module failed to load: only works on a rest_sample proxy minion.')
 
 
 def get_all():
@@ -40,8 +44,8 @@ def get_all():
 
         salt '*' service.get_all
     '''
-    proxy_fn = 'rest_sample'+ '.service_list'
-    return __opts__['proxymodule'][proxy_fn]()
+    proxy_fn = 'rest_sample.service_list'
+    return __proxy__[proxy_fn]()
 
 
 def list_():
@@ -72,8 +76,8 @@ def start(name, sig=None):
         salt '*' service.start <service name>
     '''
 
-    proxy_fn = 'rest_sample'+ '.service_start'
-    return __opts__['proxymodule'][proxy_fn](name)
+    proxy_fn = 'rest_sample.service_start'
+    return __proxy__[proxy_fn](name)
 
 
 def stop(name, sig=None):
@@ -88,8 +92,8 @@ def stop(name, sig=None):
 
         salt '*' service.stop <service name>
     '''
-    proxy_fn = 'rest_sample'+ '.service_stop'
-    return __opts__['proxymodule'][proxy_fn](name)
+    proxy_fn = 'rest_sample.service_stop'
+    return __proxy__[proxy_fn](name)
 
 
 def restart(name, sig=None):
@@ -105,8 +109,8 @@ def restart(name, sig=None):
         salt '*' service.restart <service name>
     '''
 
-    proxy_fn = 'rest_sample'+ '.service_restart'
-    return __opts__['proxymodule'][proxy_fn](name)
+    proxy_fn = 'rest_sample.service_restart'
+    return __proxy__[proxy_fn](name)
 
 
 def status(name, sig=None):
@@ -123,8 +127,8 @@ def status(name, sig=None):
         salt '*' service.status <service name>
     '''
 
-    proxy_fn = 'rest_sample' + '.service_status'
-    resp = __opts__['proxymodule'][proxy_fn](name)
+    proxy_fn = 'rest_sample.service_status'
+    resp = __proxy__[proxy_fn](name)
     if resp['comment'] == 'stopped':
         return False
     if resp['comment'] == 'running':

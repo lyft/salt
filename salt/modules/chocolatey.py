@@ -102,20 +102,34 @@ def chocolatey_version():
     '''
     if 'chocolatey._version' in __context__:
         return __context__['chocolatey._version']
-    cmd = [_find_chocolatey(__context__, __salt__), 'help']
-    out = __salt__['cmd.run'](cmd, python_shell=False)
-    for line in out.splitlines():
-        line = line.lower()
-        if line.startswith('chocolatey v'):
-            __context__['chocolatey._version'] = line[12:]
-            return __context__['chocolatey._version']
-        elif line.startswith('version: '):
-            try:
-                __context__['chocolatey._version'] = \
-                    line.split(None, 1)[-1].strip("'")
+
+    def find_version(legacy=False):
+        cmd = [_find_chocolatey(__context__, __salt__)]
+        if legacy:
+            cmd.append('help')
+        out = __salt__['cmd.run'](cmd, python_shell=False)
+        for line in out.splitlines():
+            line = line.lower()
+            if line.startswith('chocolatey v'):
+                __context__['chocolatey._version'] = line[12:]
                 return __context__['chocolatey._version']
-            except Exception:
-                pass
+            elif line.startswith('version: '):
+                try:
+                    __context__['chocolatey._version'] = \
+                        line.split(None, 1)[-1].strip("'")
+                    return __context__['chocolatey._version']
+                except Exception:
+                    pass
+        return None
+
+    # First try to find if we have a newer version of choco
+    # which doesn't contain the help command,
+    # else try for a legacy version
+    for legacy in [False, True]:
+        ver = find_version(legacy=legacy)
+        if ver is not None:
+            return ver
+
     raise CommandExecutionError('Unable to determine Chocolatey version')
 
 
@@ -772,13 +786,7 @@ def version(name, check_remote=False, source=None, pre_versions=False):
         log.error(err)
         raise CommandExecutionError(err)
 
-    use_list = _LooseVersion(chocolatey_version()) >= _LooseVersion('0.9.9')
-    if use_list:
-        choco_cmd = "list"
-    else:
-        choco_cmd = "version"
-
-    cmd = [choc_path, choco_cmd, name]
+    cmd = [choc_path, 'list', name]
     if not salt.utils.is_true(check_remote):
         cmd.append('-LocalOnly')
     if salt.utils.is_true(pre_versions):
@@ -796,22 +804,11 @@ def version(name, check_remote=False, source=None, pre_versions=False):
     ret = {}
 
     res = result['stdout'].split('\n')
-    if use_list:
-        res = res[:-1]
 
-    # the next bit is to deal with the stupid default PowerShell formatting.
-    # printing two value pairs is shown in columns, whereas printing six
-    # pairs is shown in rows...
-    if not salt.utils.is_true(check_remote):
-        ver_re = re.compile(r'(\S+)\s+(.+)')
-        for line in res:
+    ver_re = re.compile(r'(\S+)\s+(.+)')
+    for line in res:
+        if 'packages found' not in line and 'packages installed' not in line:
             for name, ver in ver_re.findall(line):
-                ret['name'] = name
-                ret['found'] = ver
-    else:
-        ver_re = re.compile(r'(\S+)\s+:\s*(.*)')
-        for line in res:
-            for key, value in ver_re.findall(line):
-                ret[key] = value
+                ret[name] = ver
 
     return ret

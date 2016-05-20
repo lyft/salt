@@ -112,7 +112,16 @@ def list_(show_all=False, where=None, return_yaml=True):
                 schedule[job][item] = False
 
         if '_seconds' in schedule[job]:
-            schedule[job]['seconds'] = schedule[job]['_seconds']
+            # if _seconds is greater than zero
+            # then include the original back in seconds.
+            # otherwise remove seconds from the listing as the
+            # original item didn't include it.
+            if schedule[job]['_seconds'] > 0:
+                schedule[job]['seconds'] = schedule[job]['_seconds']
+            else:
+                del schedule[job]['seconds']
+
+            # remove _seconds from the listing
             del schedule[job]['_seconds']
 
     if schedule:
@@ -317,6 +326,11 @@ def build_schedule_item(name, **kwargs):
     else:
         schedule[name]['name'] = name
 
+    if 'enabled' in kwargs:
+        schedule[name]['enabled'] = kwargs['enabled']
+    else:
+        schedule[name]['enabled'] = True
+
     if 'jid_include' not in kwargs or kwargs['jid_include']:
         schedule[name]['jid_include'] = True
 
@@ -330,7 +344,7 @@ def build_schedule_item(name, **kwargs):
             schedule[name]['splay'] = kwargs['splay']
 
     for item in ['range', 'when', 'once', 'once_fmt', 'cron', 'returner',
-            'return_config', 'until']:
+            'return_config', 'until', 'enabled']:
         if item in kwargs:
             schedule[name][item] = kwargs[item]
 

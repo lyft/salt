@@ -55,7 +55,6 @@ as a passed in dict, or as a string to pull from pillars or minion config:
             - AddToLoadBalancer
             - AlarmNotification
         - scaling_policies
-            ----------
             - adjustment_type: ChangeInCapacity
             - as_name: api-production-iad
             - cooldown: 1800
@@ -251,17 +250,17 @@ def present(
         Name of the autoscale group.
 
     launch_config_name
-    Name of the launch config to use for the group.  Or, if
-    launch_config is specified, this will be the launch config
-    name's prefix.  (see below)
+        Name of the launch config to use for the group.  Or, if
+        ``launch_config`` is specified, this will be the launch config
+        name's prefix.  (see below)
 
     launch_config
-    A dictionary of launch config attributes.  If specified, a
-    launch config will be used or created, matching this set
-    of attributes, and the autoscale group will be set to use
-    that launch config.  The launch config name will be the
-    launch_config_name followed by a hyphen followed by a hash
-    of the launch_config dict contents.
+        A dictionary of launch config attributes.  If specified, a
+        launch config will be used or created, matching this set
+        of attributes, and the autoscale group will be set to use
+        that launch config.  The launch config name will be the
+        ``launch_config_name`` followed by a hyphen followed by a hash
+        of the ``launch_config`` dict contents.
 
     availability_zones
         List of availability zones for the group.
@@ -300,15 +299,23 @@ def present(
 
     tags
         A list of tags. Example:
+
+        .. code-block:: yaml
+
             - key: 'key'
               value: 'value'
               propagate_at_launch: true
 
     termination_policies
-        A list of termination policies. Valid values are: “OldestInstance”,
-        “NewestInstance”, “OldestLaunchConfiguration”,
-        “ClosestToNextInstanceHour”, “Default”. If no value is specified, the
-        “Default” value is used.
+        A list of termination policies. Valid values are:
+
+        * ``OldestInstance``
+        * ``NewestInstance``
+        * ``OldestLaunchConfiguration``
+        * ``ClosestToNextInstanceHour``
+        * ``Default``
+
+        If no value is specified, the ``Default`` value is used.
 
     suspended_processes
         List of processes to be suspended. see
@@ -326,7 +333,9 @@ def present(
         a dictionary of name->boto_cloudwatch_alarm sections to be associated with this ASG.
         All attributes should be specified except for dimension which will be
         automatically set to this ASG.
-        See the boto_cloudwatch_alarm state for information about these attributes.
+
+        See the :mod:`salt.states.boto_cloudwatch_alarm` state for information
+        about these attributes.
 
     alarms_from_pillar:
         name of pillar dict that contains alarm settings.   Alarms defined for this specific
@@ -346,28 +355,38 @@ def present(
         that contains a dict with region, key and keyid.
 
     notification_arn
-        The aws arn that notifications will be sent to
+        The AWS arn that notifications will be sent to
 
     notification_arn_from_pillar
-        name of the pillar dict that contains notifcation_arn settings.  A notification_arn
-        defined for this specific state will override the one from pillar.
+        name of the pillar dict that contains ``notifcation_arn`` settings.  A
+        ``notification_arn`` defined for this specific state will override the
+        one from pillar.
 
     notification_types
         A list of event names that will trigger a notification.  The list of valid
         notification types is:
-            "autoscaling:EC2_INSTANCE_LAUNCH",
-            "autoscaling:EC2_INSTANCE_LAUNCH_ERROR",
-            "autoscaling:EC2_INSTANCE_TERMINATE",
-            "autoscaling:EC2_INSTANCE_TERMINATE_ERROR",
-            "autoscaling:TEST_NOTIFICATION"
+
+        * ``autoscaling:EC2_INSTANCE_LAUNCH``
+        * ``autoscaling:EC2_INSTANCE_LAUNCH_ERROR``
+        * ``autoscaling:EC2_INSTANCE_TERMINATE``
+        * ``autoscaling:EC2_INSTANCE_TERMINATE_ERROR``
+        * ``autoscaling:TEST_NOTIFICATION``
 
     notification_types_from_pillar
-        name of the pillar dict that contains notifcation_types settings.  Notification_types
-        defined for this specific state will override those from the pillar.
+        name of the pillar dict that contains ``notifcation_types`` settings.
+        ``notification_types`` defined for this specific state will override those
+        from the pillar.
     '''
     ret = {'name': name, 'result': True, 'comment': '', 'changes': {}}
     if vpc_zone_identifier:
-        vpc_id = __salt__['boto_vpc.get_subnet_association'](vpc_zone_identifier, region, key, keyid, profile)
+        vpc_id = __salt__['boto_vpc.get_subnet_association'](
+            vpc_zone_identifier,
+            region,
+            key,
+            keyid,
+            profile
+        )
+        vpc_id = vpc_id.get('vpc_id')
         log.debug('Auto Scaling Group {0} is associated with VPC ID {1}'
                   .format(name, vpc_id))
     else:
@@ -408,8 +427,7 @@ def present(
         for cfg in launch_config:
             args.update(cfg)
         if not __opts__['test']:
-            lc_ret = __salt__['state.single']('boto_lc.present', **args)
-            lc_ret = next(six.itervalues(lc_ret))
+            lc_ret = __states__['boto_lc.present'](**args)
             if lc_ret['result'] is True and lc_ret['changes']:
                 if 'launch_config' not in ret['changes']:
                     ret['changes']['launch_config'] = {}
@@ -561,6 +579,8 @@ def present(
     _ret = _alarms_present(name, alarms, alarms_from_pillar, region, key, keyid, profile)
     ret['changes'] = dictupdate.update(ret['changes'], _ret['changes'])
     ret['comment'] = ' '.join([ret['comment'], _ret['comment']])
+    if not _ret['result']:
+        ret['result'] = _ret['result']
     return ret
 
 
@@ -602,7 +622,8 @@ def _alarms_present(name, alarms, alarms_from_pillar, region, key, keyid, profil
         info['name'] = name + ' ' + info['name']
         info['attributes']['description'] = name + ' ' + info['attributes']['description']
         # add dimension attribute
-        info['attributes']['dimensions'] = {'AutoScalingGroupName': [name]}
+        if 'dimensions' not in info['attributes']:
+            info['attributes']['dimensions'] = {'AutoScalingGroupName': [name]}
         # set alarm
         kwargs = {
             'name': info['name'],
@@ -612,8 +633,7 @@ def _alarms_present(name, alarms, alarms_from_pillar, region, key, keyid, profil
             'keyid': keyid,
             'profile': profile,
         }
-        ret = __salt__['state.single']('boto_cloudwatch_alarm.present', **kwargs)
-        results = next(six.itervalues(ret))
+        results = __states__['boto_cloudwatch_alarm.present'](**kwargs)
         if not results['result']:
             merged_return_value['result'] = False
         if results.get('changes', {}) != {}:

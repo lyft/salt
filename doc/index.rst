@@ -32,7 +32,7 @@ shell script, which automates the install correctly on  multiple platforms:
 Get Started
 ===============
 
-A new `Get Started Guide <http://docs.saltstack.com/en/getstarted/>`_ walks you 
+A new `Get Started Guide <http://docs.saltstack.com/en/getstarted/>`_ walks you
 through the basics of getting SaltStack up and running. You'll learn how to:
 
 * Install and configure SaltStack
@@ -64,6 +64,26 @@ Running Salt without root access in userland:
 
 A list of all tutorials can be found here:
     :doc:`All Salt tutorials <topics/tutorials/index>`
+
+Demo Environments
+=================
+
+You can download one of the following `Vagrant <http://vagrantup.com>`_
+projects to quickly set up a Salt demo environment:
+
+- https://github.com/UtahDave/salt-vagrant-demo
+- https://github.com/UtahDave/salt-vagrant-lxc
+
+Example Formulas
+================
+
+A Github repo that contains a number of community-maintained formulas is
+available at https://github.com/saltstack-formulas. Contributions are welcome!
+
+A Github repo that contains formulas to install a number of Windows
+applications is available at https://github.com/saltstack/salt-winrepo-ng. Note
+that Salt makes this repo :ref:`available <windows-package-manager>` to your
+Windows minions, and contributions are welcome!
 
 Salt in depth
 =============

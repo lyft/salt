@@ -116,9 +116,10 @@ class Serial(object):
             gc.disable()  # performance optimization for msgpack
             return msgpack.loads(msg, use_list=True)
         except Exception as exc:
-            log.critical('Could not deserialize msgpack message: {0}'
-                         'This often happens when trying to read a file not in binary mode.'
-                         'Please open an issue and include the following error: {1}'.format(msg, exc))
+            log.critical('Could not deserialize msgpack message.'
+                         'This often happens when trying to read a file not in binary mode'
+                         'To see message payload, enable debug logging and retry. Exception: {0}'.format(exc))
+            log.debug('Msgpack deserialization failure on message: {0}'.format(msg))
             raise
         finally:
             gc.enable()
@@ -152,7 +153,7 @@ class Serial(object):
                     for idx, entry in enumerate(obj):
                         obj[idx] = verylong_encoder(entry)
                     return obj
-                if six.PY2 and isinstance(obj, long) and long > pow(2, 64):  # pylint: disable=incompatible-py3-code
+                if six.PY2 and isinstance(obj, long) and long > pow(2, 64):
                     return str(obj)
                 elif six.PY3 and isinstance(obj, int) and int > pow(2, 64):
                     return str(obj)
@@ -211,7 +212,7 @@ class Serial(object):
                     return obj
                 return obj
             return msgpack.dumps(odict_encoder(msg))
-        except (SystemError, TypeError) as exc:
+        except (SystemError, TypeError) as exc:  # pylint: disable=W0705
             log.critical('Unable to serialize message! Consider upgrading msgpack. '
                          'Message which failed was {failed_message} '
                          'with exception {exception_message}').format(msg, exc)

@@ -216,7 +216,7 @@ class SaltClientsMixIn(object):
                 # not the actual client we'll use.. but its what we'll use to get args
                 'local_batch': local_client.cmd_batch,
                 'local_async': local_client.run_job,
-                'runner': salt.runner.RunnerClient(opts=self.application.opts).async,
+                'runner': salt.runner.RunnerClient(opts=self.application.opts).cmd_async,
                 'runner_async': None,  # empty, since we use the same client as `runner`
                 }
         return SaltClientsMixIn.__saltclients
@@ -498,7 +498,7 @@ class BaseSaltAPIHandler(tornado.web.RequestHandler, SaltClientsMixIn):  # pylin
             'application/json': json.loads,
             'application/x-yaml': yaml.safe_load,
             'text/yaml': yaml.safe_load,
-            # because people are terrible and dont mean what they say
+            # because people are terrible and don't mean what they say
             'text/plain': json.loads
         }
 
@@ -804,8 +804,6 @@ class SaltAPIHandler(BaseSaltAPIHandler, SaltClientsMixIn):  # pylint: disable=W
     def disbatch(self):
         '''
         Disbatch all lowstates to the appropriate clients
-
-        Auth must have been verified before this point
         '''
         ret = []
 
@@ -814,16 +812,23 @@ class SaltAPIHandler(BaseSaltAPIHandler, SaltClientsMixIn):  # pylint: disable=W
             client = low.get('client')
             self._verify_client(client)
 
-        for low in self.lowstate:
-            # make sure that the chunk has a token, if not we can't do auth per-request
-            # Note: this means that you can send different tokens per lowstate
-            # as long as the base token (to auth with the API) is valid
-            if 'token' not in low:
+            # Make sure we have 'token' or 'username'/'password' in each low chunk.
+            # Salt will verify the credentials are correct.
+            if self.token is not None and 'token' not in low:
                 low['token'] = self.token
+
+            if not (('token' in low)
+                    or ('username' in low and 'password' in low and 'eauth' in low)):
+                ret.append('Failed to authenticate')
+                break
+
             # disbatch to the correct handler
             try:
                 chunk_ret = yield getattr(self, '_disbatch_{0}'.format(low['client']))(low)
                 ret.append(chunk_ret)
+            except EauthAuthenticationError as exc:
+                ret.append('Failed to authenticate')
+                break
             except Exception as ex:
                 ret.append('Unexpected exception while handling request: {0}'.format(ex))
                 logger.error('Unexpected exception while handling request:', exc_info=True)
@@ -1021,8 +1026,7 @@ class SaltAPIHandler(BaseSaltAPIHandler, SaltClientsMixIn):  # pylint: disable=W
         '''
         Disbatch runner client commands
         '''
-        f_call = {'args': [chunk['fun'], chunk]}
-        pub_data = self.saltclients['runner'](chunk['fun'], chunk)
+        pub_data = self.saltclients['runner'](chunk)
         tag = pub_data['tag'] + '/ret'
         try:
             event = yield self.application.event_listener.get_event(self, tag=tag)
@@ -1037,8 +1041,7 @@ class SaltAPIHandler(BaseSaltAPIHandler, SaltClientsMixIn):  # pylint: disable=W
         '''
         Disbatch runner client_async commands
         '''
-        f_call = {'args': [chunk['fun'], chunk]}
-        pub_data = self.saltclients['runner'](chunk['fun'], chunk)
+        pub_data = self.saltclients['runner'](chunk)
         raise tornado.gen.Return(pub_data)
 
 
@@ -1612,7 +1615,13 @@ class WebhookSaltAPIHandler(SaltAPIHandler):  # pylint: disable=W0223
 
         ret = self.event.fire_event({
             'post': self.raw_data,
-            'headers': self.request.headers,
+            'get': dict(self.request.query_arguments),
+            # In Tornado >= v4.0.3, the headers come
+            # back as an HTTPHeaders instance, which
+            # is a dictionary. We must cast this as
+            # a dictionary in order for msgpack to
+            # serialize it.
+            'headers': dict(self.request.headers),
         }, tag)
 
         self.write(self.serialize({'success': ret}))

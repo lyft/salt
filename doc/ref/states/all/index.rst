@@ -50,6 +50,7 @@ Full list of builtin state modules
     cyg
     ddns
     debconfmod
+    dellchassis
     disk
     dockerio
     dockerng
@@ -59,11 +60,13 @@ Full list of builtin state modules
     environ
     eselect
     etcd_mod
+    esxi
     event
     file
     firewalld
     gem
     git
+    glance
     glusterfs
     gnomedesktop
     grafana

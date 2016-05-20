@@ -36,6 +36,9 @@ import salt.utils.locales
 # Import 3rd-party libs
 import salt.ext.six as six
 
+# Import 3rd-party libs
+import salt.ext.six as six
+
 log = logging.getLogger(__name__)
 
 
@@ -96,6 +99,8 @@ def _changes(name,
         return False
 
     change = {}
+    if groups is None:
+        groups = lusr['groups']
     wanted_groups = sorted(set((groups or []) + (optional_groups or [])))
     if uid:
         if lusr['uid'] != uid:
@@ -233,7 +238,8 @@ def present(name,
         A list of groups to assign the user to, pass a list object. If a group
         specified here does not exist on the minion, the state will fail.
         If set to the empty list, the user will be removed from all groups
-        except the default group.
+        except the default group. If unset, salt will assume current groups
+        are still wanted (see issue #28706).
 
     optional_groups
         A list of groups to assign the user to, pass a list object. If a group
@@ -260,7 +266,8 @@ def present(name,
 
     password
         A password hash to set for the user. This field is only supported on
-        Linux, FreeBSD, NetBSD, OpenBSD, and Solaris.
+        Linux, FreeBSD, NetBSD, OpenBSD, and Solaris. If the ``empty_password``
+        argument is set to ``True`` then ``password`` is ignored.
         For Windows this is the plain text password.
 
     .. versionchanged:: 0.16.0
@@ -344,20 +351,24 @@ def present(name,
         mapped to the specified drive. Must be a letter followed by a colon.
         Because of the colon, the value must be surrounded by single quotes. ie:
         - win_homedrive: 'U:
-    .. versionchanged:: 2015.8.0
+
+        .. versionchanged:: 2015.8.0
 
     win_profile (Windows Only)
         The custom profile directory of the user. Uses default value of
         underlying system if not set.
-    .. versionchanged:: 2015.8.0
+
+        .. versionchanged:: 2015.8.0
 
     win_logonscript (Windows Only)
         The full path to the logon script to run when the user logs in.
-    .. versionchanged:: 2015.8.0
+
+        .. versionchanged:: 2015.8.0
 
     win_description (Windows Only)
         A brief description of the purpose of the users account.
-    .. versionchanged:: 2015.8.0
+
+        .. versionchanged:: 2015.8.0
     '''
     if fullname is not None:
         fullname = salt.utils.locales.sdecode(fullname)
@@ -512,7 +523,10 @@ def present(name,
         if 'shadow.info' in __salt__:
             for key in spost:
                 if lshad[key] != spost[key]:
-                    ret['changes'][key] = spost[key]
+                    if key == 'passwd':
+                        ret['changes'][key] = 'XXX-REDACTED-XXX'
+                    else:
+                        ret['changes'][key] = spost[key]
         if __grains__['kernel'] == 'OpenBSD':
             if lcpre != lcpost:
                 ret['changes']['loginclass'] = lcpost
@@ -595,6 +609,9 @@ def present(name,
         if __salt__['user.add'](**params):
             ret['comment'] = 'New user {0} created'.format(name)
             ret['changes'] = __salt__['user.info'](name)
+            if not createhome:
+                # pwd incorrectly reports presence of home
+                ret['changes']['home'] = ''
             if 'shadow.info' in __salt__ and not salt.utils.is_windows():
                 if password and not empty_password:
                     __salt__['shadow.set_password'](name, password)

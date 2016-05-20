@@ -23,6 +23,18 @@ This package can be installed using `pip` or `easy_install`:
     pip install pyvmomi
     easy_install pyvmomi
 
+.. note::
+
+    Version 6.0 of pyVmomi has some problems with SSL error handling on certain
+    versions of Python. If using version 6.0 of pyVmomi, the machine that you
+    are running the proxy minion process from must have either Python 2.7.9 or
+    newer This is due to an upstream dependency in pyVmomi 6.0 that is not supported
+    in Python version 2.6 to 2.7.8. If the version of Python running the salt-cloud
+    command is not in the supported range, you will need to install an earlier version
+    of pyVmomi. See `Issue #29537`_ for more information.
+
+.. _Issue #29537: https://github.com/saltstack/salt/issues/29537
+
 
 Configuration
 =============
@@ -110,7 +122,7 @@ Set up an initial profile at ``/etc/salt/cloud.profiles`` or
             ip: 10.20.30.123
             gateway: [10.20.30.110]
             subnet_mask: 255.255.255.128
-            domain: mycompany.com
+            domain: example.com
           Network adapter 2:
             name: 10.30.40-500-Dev-DHCP
             adapter_type: e1000
@@ -122,7 +134,7 @@ Set up an initial profile at ``/etc/salt/cloud.profiles`` or
             ip: 10.40.50.123
             gateway: [10.40.50.110]
             subnet_mask: 255.255.255.128
-            domain: mycompany.com
+            domain: example.com
         scsi:
           SCSI controller 1:
             type: lsilogic
@@ -133,7 +145,7 @@ Set up an initial profile at ``/etc/salt/cloud.profiles`` or
             type: paravirtual
             bus_sharing: physical
 
-      domain: mycompany.com
+      domain: example.com
       dns_servers:
         - 123.127.255.240
         - 123.127.255.241
@@ -393,3 +405,8 @@ Set up an initial profile at ``/etc/salt/cloud.profiles`` or
 ``hardware_version``
     Specify the virtual hardware version for the vm/template that is supported by the
     host.
+
+``customization``
+    Specify whether the new virtual machine should be customized or not. If
+    ``customization: False`` is set, the new virtual machine will not be customized.
+    Default is ``customization: True``.

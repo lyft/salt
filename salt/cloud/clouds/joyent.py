@@ -196,7 +196,7 @@ def query_instance(vm_=None, call=None):
 
         if isinstance(data, dict) and 'error' in data:
             log.warn(
-                'There was an error in the query {0}'.format(data['error'])  # pylint: disable=E1126
+                'There was an error in the query. {0}'.format(data.get('error'))
             )
             # Trigger a failure in the wait for IP function
             return False
@@ -244,7 +244,8 @@ def create(vm_):
         # Check for required profile parameters before sending any API calls.
         if vm_['profile'] and config.is_profile_configured(__opts__,
                                                            __active_provider_name__ or 'joyent',
-                                                           vm_['profile']) is False:
+                                                           vm_['profile'],
+                                                           vm_=vm_) is False:
             return False
     except AttributeError:
         pass
@@ -1079,7 +1080,7 @@ def query(action=None,
         text=True,
         status=True,
         headers=True,
-        verify=verify_ssl,
+        verify_ssl=verify_ssl,
         opts=__opts__,
     )
     log.debug(

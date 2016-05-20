@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 '''
 Package support for pkgin based systems, inspired from freebsdpkg module
+
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
 '''
 
 # Import python libs
@@ -73,15 +79,6 @@ def _supports_regex():
     '''
 
     return tuple([int(i) for i in _get_version()]) > (0, 5)
-
-
-@decorators.memoize
-def _supports_parsing():
-    '''
-    Check support of parsing
-    '''
-
-    return tuple([int(i) for i in _get_version()]) > (0, 7)
 
 
 def __virtual__():
@@ -187,7 +184,7 @@ def latest_version(*names, **kwargs):
 
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def version(*names, **kwargs):
@@ -263,10 +260,9 @@ def list_pkgs(versions_as_list=False, **kwargs):
     out = __salt__['cmd.run'](pkg_command, output_loglevel='trace')
     for line in out.splitlines():
         try:
-            if _supports_parsing():
-                pkg, ver = line.split(';', 1)[0].rsplit('-', 1)
-            else:
-                pkg, ver = line.split(' ', 1)[0].rsplit('-', 1)
+            # Some versions of pkgin check isatty unfortunately
+            # this results in cases where a ' ' or ';' can be used
+            pkg, ver = re.split('[; ]', line, 1)[0].rsplit('-', 1)
         except ValueError:
             continue
         __salt__['pkg_resource.add_pkg'](ret, pkg, ver)

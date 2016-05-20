@@ -15,6 +15,7 @@ import logging
 import traceback
 import binascii
 import weakref
+import getpass
 from salt.ext.six.moves import zip  # pylint: disable=import-error,redefined-builtin
 
 # Import third party libs
@@ -55,6 +56,9 @@ def dropfile(cachedir, user=None):
     mask = os.umask(191)
     try:
         log.info('Rotating AES key')
+        if os.path.isfile(dfn):
+            log.info('AES key rotation already requested')
+            return
 
         with salt.utils.fopen(dfn, 'wb+') as fp_:
             fp_.write('')
@@ -85,11 +89,17 @@ def gen_keys(keydir, keyname, keysize, user=None):
     priv = '{0}.pem'.format(base)
     pub = '{0}.pub'.format(base)
 
+    salt.utils.reinit_crypto()
     gen = RSA.generate(bits=keysize, e=65537)
     if os.path.isfile(priv):
         # Between first checking and the generation another process has made
         # a key! Use the winner's key
         return priv
+
+    # Do not try writing anything, if directory has no permissions.
+    if not os.access(keydir, os.W_OK):
+        raise IOError('Write access denied to "{0}" for user "{1}".'.format(os.path.abspath(keydir), getpass.getuser()))
+
     cumask = os.umask(191)
     with salt.utils.fopen(priv, 'wb+') as f:
         f.write(gen.exportKey('PEM'))
@@ -305,7 +315,7 @@ class AsyncAuth(object):
 
     def __new__(cls, opts, io_loop=None):
         '''
-        Only create one instance of SAuth per __key()
+        Only create one instance of AsyncAuth per __key()
         '''
         # do we have any mapping for this io_loop
         io_loop = io_loop or tornado.ioloop.IOLoop.current()
@@ -315,7 +325,7 @@ class AsyncAuth(object):
 
         key = cls.__key(opts)
         if key not in loop_instance_map:
-            log.debug('Initializing new SAuth for {0}'.format(key))
+            log.debug('Initializing new AsyncAuth for {0}'.format(key))
             # we need to make a local variable for this, as we are going to store
             # it in a WeakValueDictionary-- which will remove the item if no one
             # references it-- this forces a reference while we return to the caller
@@ -323,7 +333,7 @@ class AsyncAuth(object):
             new_auth.__singleton_init__(opts, io_loop=io_loop)
             loop_instance_map[key] = new_auth
         else:
-            log.debug('Re-using SAuth for {0}'.format(key))
+            log.debug('Re-using AsyncAuth for {0}'.format(key))
         return loop_instance_map[key]
 
     @classmethod
@@ -427,10 +437,14 @@ class AsyncAuth(object):
         if not acceptance_wait_time_max:
             acceptance_wait_time_max = acceptance_wait_time
         creds = None
+        channel = salt.transport.client.AsyncReqChannel.factory(self.opts,
+                                                                crypt='clear',
+                                                                io_loop=self.io_loop)
+        error = None
         while True:
             try:
-                creds = yield self.sign_in()
-            except SaltClientError:
+                creds = yield self.sign_in(channel=channel)
+            except SaltClientError as error:
                 break
             if creds == 'retry':
                 if self.opts.get('caller'):
@@ -450,9 +464,9 @@ class AsyncAuth(object):
                 del AsyncAuth.creds_map[self.__key(self.opts)]
             except KeyError:
                 pass
-            self._authenticate_future.set_exception(
-                SaltClientError('Attempt to authenticate with the salt master failed')
-            )
+            if not error:
+                error = SaltClientError('Attempt to authenticate with the salt master failed')
+            self._authenticate_future.set_exception(error)
         else:
             AsyncAuth.creds_map[self.__key(self.opts)] = creds
             self._creds = creds
@@ -460,7 +474,7 @@ class AsyncAuth(object):
             self._authenticate_future.set_result(True)  # mark the sign-in as complete
 
     @tornado.gen.coroutine
-    def sign_in(self, timeout=60, safe=True, tries=1):
+    def sign_in(self, timeout=60, safe=True, tries=1, channel=None):
         '''
         Send a sign in request to the master, sets the key information and
         returns a dict containing the master publish interface to bind to
@@ -492,13 +506,15 @@ class AsyncAuth(object):
 
         auth['master_uri'] = self.opts['master_uri']
 
-        channel = salt.transport.client.AsyncReqChannel.factory(self.opts,
+        if not channel:
+            channel = salt.transport.client.AsyncReqChannel.factory(self.opts,
                                                                 crypt='clear',
                                                                 io_loop=self.io_loop)
 
+        sign_in_payload = self.minion_sign_in_payload()
         try:
             payload = yield channel.send(
-                self.minion_sign_in_payload(),
+                sign_in_payload,
                 tries=tries,
                 timeout=timeout
             )
@@ -539,7 +555,7 @@ class AsyncAuth(object):
                         )
                     )
                     raise tornado.gen.Return('retry')
-        auth['aes'] = self.verify_master(payload)
+        auth['aes'] = self.verify_master(payload, master_pub='token' in sign_in_payload)
         if not auth['aes']:
             log.critical(
                 'The Salt Master server\'s public key did not authenticate!\n'
@@ -554,11 +570,11 @@ class AsyncAuth(object):
         if self.opts.get('syndic_master', False):  # Is syndic
             syndic_finger = self.opts.get('syndic_finger', self.opts.get('master_finger', False))
             if syndic_finger:
-                if salt.utils.pem_finger(m_pub_fn) != syndic_finger:
+                if salt.utils.pem_finger(m_pub_fn, sum_type=self.opts['hash_type']) != syndic_finger:
                     self._finger_fail(syndic_finger, m_pub_fn)
         else:
             if self.opts.get('master_finger', False):
-                if salt.utils.pem_finger(m_pub_fn) != self.opts['master_finger']:
+                if salt.utils.pem_finger(m_pub_fn, sum_type=self.opts['hash_type']) != self.opts['master_finger']:
                     self._finger_fail(self.opts['master_finger'], m_pub_fn)
         auth['publish_port'] = payload['publish_port']
         raise tornado.gen.Return(auth)
@@ -802,7 +818,7 @@ class AsyncAuth(object):
             aes, token = self.decrypt_aes(payload, master_pub)
             return aes
 
-    def verify_master(self, payload):
+    def verify_master(self, payload, master_pub=True):
         '''
         Verify that the master is the same one that was previously accepted.
 
@@ -812,12 +828,15 @@ class AsyncAuth(object):
             'publish_port': The TCP port which published the message
             'token': The encrypted token used to verify the message.
             'pub_key': The RSA public key of the sender.
+        :param bool master_pub: Operate as if minion had no master pubkey when it sent auth request, i.e. don't verify
+        the minion signature
 
         :rtype: str
         :return: An empty string on verification failure. On success, the decrypted AES message in the payload.
         '''
         m_pub_fn = os.path.join(self.opts['pki_dir'], self.mpub)
-        if os.path.isfile(m_pub_fn) and not self.opts['open_mode']:
+        m_pub_exists = os.path.isfile(m_pub_fn)
+        if m_pub_exists and master_pub and not self.opts['open_mode']:
             local_master_pub = salt.utils.fopen(m_pub_fn).read()
 
             if payload['pub_key'].replace('\n', '').replace('\r', '') != \
@@ -864,11 +883,26 @@ class AsyncAuth(object):
                     return self.extract_aes(payload, master_pub=False)
                 else:
                     return ''
-            # the minion has not received any masters pubkey yet, write
-            # the newly received pubkey to minion_master.pub
             else:
-                salt.utils.fopen(m_pub_fn, 'wb+').write(payload['pub_key'])
+                if not m_pub_exists:
+                    # the minion has not received any masters pubkey yet, write
+                    # the newly received pubkey to minion_master.pub
+                    salt.utils.fopen(m_pub_fn, 'wb+').write(payload['pub_key'])
                 return self.extract_aes(payload, master_pub=False)
+
+    def _finger_fail(self, finger, master_key):
+        log.critical(
+            'The specified fingerprint in the master configuration '
+            'file:\n{0}\nDoes not match the authenticating master\'s '
+            'key:\n{1}\nVerify that the configured fingerprint '
+            'matches the fingerprint of the correct master and that '
+            'this minion is not subject to a man-in-the-middle attack.'
+            .format(
+                finger,
+                salt.utils.pem_finger(master_key, sum_type=self.opts['hash_type'])
+            )
+        )
+        sys.exit(42)
 
 
 # TODO: remove, we should just return a sync wrapper of AsyncAuth
@@ -951,10 +985,11 @@ class SAuth(AsyncAuth):
         '''
         acceptance_wait_time = self.opts['acceptance_wait_time']
         acceptance_wait_time_max = self.opts['acceptance_wait_time_max']
+        channel = salt.transport.client.ReqChannel.factory(self.opts, crypt='clear')
         if not acceptance_wait_time_max:
             acceptance_wait_time_max = acceptance_wait_time
         while True:
-            creds = self.sign_in()
+            creds = self.sign_in(channel=channel)
             if creds == 'retry':
                 if self.opts.get('caller'):
                     print('Minion failed to authenticate with the master, '
@@ -971,7 +1006,7 @@ class SAuth(AsyncAuth):
         self._creds = creds
         self._crypticle = Crypticle(self.opts, creds['aes'])
 
-    def sign_in(self, timeout=60, safe=True, tries=1):
+    def sign_in(self, timeout=60, safe=True, tries=1, channel=None):
         '''
         Send a sign in request to the master, sets the key information and
         returns a dict containing the master publish interface to bind to
@@ -1003,11 +1038,13 @@ class SAuth(AsyncAuth):
 
         auth['master_uri'] = self.opts['master_uri']
 
-        channel = salt.transport.client.ReqChannel.factory(self.opts, crypt='clear')
+        if not channel:
+            channel = salt.transport.client.ReqChannel.factory(self.opts, crypt='clear')
 
+        sign_in_payload = self.minion_sign_in_payload()
         try:
             payload = channel.send(
-                self.minion_sign_in_payload(),
+                sign_in_payload,
                 tries=tries,
                 timeout=timeout
             )
@@ -1015,7 +1052,7 @@ class SAuth(AsyncAuth):
             if safe:
                 log.warning('SaltReqTimeoutError: {0}'.format(e))
                 return 'retry'
-            raise SaltClientError('Attempt to authenticate with the salt master failed')
+            raise SaltClientError('Attempt to authenticate with the salt master failed with timeout error')
 
         if 'load' in payload:
             if 'ret' in payload['load']:
@@ -1052,7 +1089,7 @@ class SAuth(AsyncAuth):
                         )
                     )
                     return 'retry'
-        auth['aes'] = self.verify_master(payload)
+        auth['aes'] = self.verify_master(payload, master_pub='token' in sign_in_payload)
         if not auth['aes']:
             log.critical(
                 'The Salt Master server\'s public key did not authenticate!\n'
@@ -1067,28 +1104,14 @@ class SAuth(AsyncAuth):
         if self.opts.get('syndic_master', False):  # Is syndic
             syndic_finger = self.opts.get('syndic_finger', self.opts.get('master_finger', False))
             if syndic_finger:
-                if salt.utils.pem_finger(m_pub_fn) != syndic_finger:
+                if salt.utils.pem_finger(m_pub_fn, sum_type=self.opts['hash_type']) != syndic_finger:
                     self._finger_fail(syndic_finger, m_pub_fn)
         else:
             if self.opts.get('master_finger', False):
-                if salt.utils.pem_finger(m_pub_fn) != self.opts['master_finger']:
+                if salt.utils.pem_finger(m_pub_fn, sum_type=self.opts['hash_type']) != self.opts['master_finger']:
                     self._finger_fail(self.opts['master_finger'], m_pub_fn)
         auth['publish_port'] = payload['publish_port']
         return auth
-
-    def _finger_fail(self, finger, master_key):
-        log.critical(
-            'The specified fingerprint in the master configuration '
-            'file:\n{0}\nDoes not match the authenticating master\'s '
-            'key:\n{1}\nVerify that the configured fingerprint '
-            'matches the fingerprint of the correct master and that '
-            'this minion is not subject to a man-in-the-middle attack.'
-            .format(
-                finger,
-                salt.utils.pem_finger(master_key)
-            )
-        )
-        sys.exit(42)
 
 
 class Crypticle(object):

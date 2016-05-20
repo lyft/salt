@@ -53,6 +53,12 @@ class ClientFuncsDict(collections.MutableMapping):
     def __init__(self, client):
         self.client = client
 
+    def __getattr__(self, attr):
+        '''
+        Provide access eg. to 'pack'
+        '''
+        return getattr(self.client.functions, attr)
+
     def __setitem__(self, key, val):
         raise NotImplementedError()
 
@@ -285,9 +291,8 @@ class SyncClientMixin(object):
             # Inject some useful globals to *all* the function's global
             # namespace only once per module-- not per func
             completed_funcs = []
-            _functions = copy.deepcopy(self.functions)
 
-            for mod_name in six.iterkeys(_functions):
+            for mod_name in six.iterkeys(self.functions):
                 if '.' not in mod_name:
                     continue
                 mod, _ = mod_name.split('.', 1)
@@ -466,11 +471,6 @@ class AsyncClientMixin(object):
         except AttributeError:
             outputter = None
 
-        try:
-            if event.get('return').get('outputter'):
-                event['return'].pop('outputter')
-        except AttributeError:
-            pass
         # if this is a ret, we have our own set of rules
         if suffix == 'ret':
             # Check if ouputter was passed in the return data. If this is the case,

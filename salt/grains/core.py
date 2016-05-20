@@ -58,6 +58,7 @@ if salt.utils.is_windows():
     try:
         import wmi  # pylint: disable=import-error
         import salt.utils.winapi
+        import win32api
         HAS_WMI = True
     except ImportError:
         log.exception(
@@ -406,13 +407,10 @@ def _memdata(osdata):
             if comps[0].strip() == 'Memory' and comps[1].strip() == 'size:':
                 grains['mem_total'] = int(comps[2].strip())
     elif osdata['kernel'] == 'Windows' and HAS_WMI:
-        with salt.utils.winapi.Com():
-            wmi_c = wmi.WMI()
-            # this is a list of each stick of ram in a system
-            # WMI returns it as the string value of the number of bytes
-            tot_bytes = sum([int(x.Capacity) for x in wmi_c.Win32_PhysicalMemory()], 0)
-            # return memory info in gigabytes
-            grains['mem_total'] = int(tot_bytes / (1024 ** 2))
+        # get the Total Physical memory as reported by msinfo32
+        tot_bytes = win32api.GlobalMemoryStatusEx()['TotalPhys']
+        # return memory info in gigabytes
+        grains['mem_total'] = int(tot_bytes / (1024 ** 2))
     return grains
 
 
@@ -563,7 +561,7 @@ def _virtual(osdata):
                 grains['virtual'] = 'LXC'
                 break
         elif command == 'virt-what':
-            if output in ('kvm', 'qemu', 'uml', 'xen'):
+            if output in ('kvm', 'qemu', 'uml', 'xen', 'lxc'):
                 grains['virtual'] = output
                 break
             elif 'vmware' in output:
@@ -732,6 +730,8 @@ def _virtual(osdata):
             )
             if product.startswith('VMware'):
                 grains['virtual'] = 'VMware'
+            if product.startswith('VirtualBox'):
+                grains['virtual'] = 'VirtualBox'
             if maker.startswith('Xen'):
                 grains['virtual_subtype'] = '{0} {1}'.format(maker, product)
                 grains['virtual'] = 'xen'
@@ -906,7 +906,7 @@ def id_():
     '''
     return {'id': __opts__.get('id', '')}
 
-_REPLACE_LINUX_RE = re.compile(r'linux', re.IGNORECASE)
+_REPLACE_LINUX_RE = re.compile(r'\W(?:gnu/)?linux', re.IGNORECASE)
 
 # This maps (at most) the first ten characters (no spaces, lowercased) of
 # 'osfullname' to the 'os' grain that Salt traditionally uses.
@@ -918,8 +918,7 @@ _OS_NAME_MAP = {
     'archarm': 'Arch ARM',
     'arch': 'Arch',
     'debian': 'Debian',
-    'debiangnu/': 'Debian',
-    'raspbiangn': 'Raspbian',
+    'raspbian': 'Raspbian',
     'fedoraremi': 'Fedora',
     'amazonami': 'Amazon',
     'alt': 'ALT',
@@ -928,7 +927,10 @@ _OS_NAME_MAP = {
     'cloudserve': 'CloudLinux',
     'pidora': 'Fedora',
     'scientific': 'ScientificLinux',
-    'synology': 'Synology'
+    'synology': 'Synology',
+    'manjaro': 'Manjaro',
+    'sles': 'SUSE',
+    'linuxmint': 'Mint',
 }
 
 # Map the 'os' grain to the 'os_family' grain
@@ -959,6 +961,8 @@ _OS_FAMILY_MAP = {
     'SLED': 'Suse',
     'openSUSE': 'Suse',
     'SUSE': 'Suse',
+    'openSUSE Leap': 'Suse',
+    'openSUSE Tumbleweed': 'Suse',
     'Solaris': 'Solaris',
     'SmartOS': 'Solaris',
     'OpenIndiana Development': 'Solaris',
@@ -972,7 +976,8 @@ _OS_FAMILY_MAP = {
     'Linaro': 'Debian',
     'elementary OS': 'Debian',
     'ScientificLinux': 'RedHat',
-    'Raspbian': 'Debian'
+    'Raspbian': 'Debian',
+    'Manjaro': 'Arch',
 }
 
 
@@ -1005,6 +1010,31 @@ def _get_interfaces():
     if not _INTERFACES:
         _INTERFACES = salt.utils.network.interfaces()
     return _INTERFACES
+
+
+def _parse_os_release():
+    '''
+    Parse /etc/os-release and return a parameter dictionary
+
+    See http://www.freedesktop.org/software/systemd/man/os-release.html
+    for specification of the file format.
+    '''
+
+    filename = '/etc/os-release'
+    if not os.path.isfile(filename):
+        filename = '/usr/lib/os-release'
+
+    data = dict()
+    with salt.utils.fopen(filename) as ifile:
+        regex = re.compile('^([\\w]+)=(?:\'|")?(.*?)(?:\'|")?$')
+        for line in ifile:
+            match = regex.match(line.strip())
+            if match:
+                # Shell special characters ("$", quotes, backslash, backtick)
+                # are escaped with backslashes
+                data[match.group(1)] = re.sub(r'\\([$"\'\\`])', r'\1', match.group(2))
+
+    return data
 
 
 def os_data():
@@ -1137,37 +1167,35 @@ def os_data():
                                 'lsb_{0}'.format(match.groups()[0].lower())
                             ] = match.groups()[1].rstrip()
             if 'lsb_distrib_id' not in grains:
-                if os.path.isfile('/etc/os-release'):
-                    # Arch ARM Linux
-                    with salt.utils.fopen('/etc/os-release') as ifile:
-                        # Imitate lsb-release
-                        for line in ifile:
-                            # NAME="Arch Linux ARM"
-                            # ID=archarm
-                            # ID_LIKE=arch
-                            # PRETTY_NAME="Arch Linux ARM"
-                            # ANSI_COLOR="0;36"
-                            # HOME_URL="http://archlinuxarm.org/"
-                            # SUPPORT_URL="https://archlinuxarm.org/forum"
-                            # BUG_REPORT_URL=
-                            #   "https://github.com/archlinuxarm/PKGBUILDs/issues"
-                            regex = re.compile(
-                                '^([\\w]+)=(?:\'|")?([\\w\\s\\.\\-_]+)(?:\'|")?'
-                            )
-                            match = regex.match(line.rstrip('\n'))
-                            if match:
-                                name, value = match.groups()
-                                if name.lower() == 'name':
-                                    grains['lsb_distrib_id'] = value.strip()
+                if os.path.isfile('/etc/os-release') or os.path.isfile('/usr/lib/os-release'):
+                    os_release = _parse_os_release()
+                    if 'NAME' in os_release:
+                        grains['lsb_distrib_id'] = os_release['NAME'].strip()
+                    if 'VERSION_ID' in os_release:
+                        grains['lsb_distrib_release'] = os_release['VERSION_ID']
+                    if 'PRETTY_NAME' in os_release:
+                        grains['lsb_distrib_codename'] = os_release['PRETTY_NAME']
                 elif os.path.isfile('/etc/SuSE-release'):
                     grains['lsb_distrib_id'] = 'SUSE'
+                    version = ''
+                    patch = ''
                     with salt.utils.fopen('/etc/SuSE-release') as fhr:
-                        rel = re.sub("[^0-9]", "", fhr.read().split('\n')[1])
-                    with salt.utils.fopen('/etc/SuSE-release') as fhr:
-                        patch = re.sub("[^0-9]", "", fhr.read().split('\n')[2])
-                    release = rel + " SP" + patch
-                    grains['lsb_distrib_release'] = release
-                    grains['lsb_distrib_codename'] = "n.a"
+                        for line in fhr:
+                            if 'enterprise' in line.lower():
+                                grains['lsb_distrib_id'] = 'SLES'
+                                grains['lsb_distrib_codename'] = re.sub(r'\(.+\)', '', line).strip()
+                            elif 'version' in line.lower():
+                                version = re.sub(r'[^0-9]', '', line)
+                            elif 'patchlevel' in line.lower():
+                                patch = re.sub(r'[^0-9]', '', line)
+                    grains['lsb_distrib_release'] = version
+                    if patch:
+                        grains['lsb_distrib_release'] += '.' + patch
+                        patchstr = 'SP' + patch
+                        if grains['lsb_distrib_codename'] and patchstr not in grains['lsb_distrib_codename']:
+                            grains['lsb_distrib_codename'] += ' ' + patchstr
+                    if not grains['lsb_distrib_codename']:
+                        grains['lsb_distrib_codename'] = 'n.a'
                 elif os.path.isfile('/etc/altlinux-release'):
                     # ALT Linux
                     grains['lsb_distrib_id'] = 'altlinux'
@@ -1236,10 +1264,19 @@ def os_data():
             grains['osfullname'] = \
                 grains.get('lsb_distrib_id', osname).strip()
         if 'osrelease' not in grains:
+            # NOTE: This is a workaround for CentOS 7 os-release bug
+            # https://bugs.centos.org/view.php?id=8359
+            # /etc/os-release contains no minor distro release number so we fall back to parse
+            # /etc/centos-release file instead.
+            # Commit introducing this comment should be reverted after the upstream bug is released.
+            if 'CentOS Linux 7' in grains.get('lsb_distrib_codename', ''):
+                grains.pop('lsb_distrib_release', None)
             grains['osrelease'] = \
                 grains.get('lsb_distrib_release', osrelease).strip()
         grains['oscodename'] = grains.get('lsb_distrib_codename',
                                           oscodename).strip()
+        if 'Red Hat' in grains['oscodename']:
+            grains['oscodename'] = oscodename
         distroname = _REPLACE_LINUX_RE.sub('', grains['osfullname']).strip()
         # return the first ten characters with no spaces, lowercased
         shortname = distroname.replace(' ', '').lower()[:10]
@@ -1366,7 +1403,7 @@ def locale_info():
     grains = {}
     grains['locale_info'] = {}
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return grains
 
     try:
@@ -1395,7 +1432,7 @@ def hostname():
     #   domain
     grains = {}
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return grains
 
     grains['localhost'] = socket.gethostname()
@@ -1411,7 +1448,7 @@ def append_domain():
 
     grain = {}
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return grain
 
     if 'append_domain' in __opts__:
@@ -1424,7 +1461,7 @@ def ip4():
     Return a list of ipv4 addrs
     '''
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     return {'ipv4': salt.utils.network.ip_addrs(include_loopback=True)}
@@ -1435,7 +1472,7 @@ def fqdn_ip4():
     Return a list of ipv4 addrs of fqdn
     '''
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     try:
@@ -1451,7 +1488,7 @@ def ip6():
     Return a list of ipv6 addrs
     '''
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     return {'ipv6': salt.utils.network.ip_addrs6(include_loopback=True)}
@@ -1462,7 +1499,7 @@ def fqdn_ip6():
     Return a list of ipv6 addrs of fqdn
     '''
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     try:
@@ -1476,11 +1513,12 @@ def fqdn_ip6():
 def ip_interfaces():
     '''
     Provide a dict of the connected interfaces and their ip addresses
+    The addresses will be passed as a list for each interface
     '''
     # Provides:
     #   ip_interfaces
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     ret = {}
@@ -1503,11 +1541,12 @@ def ip_interfaces():
 def ip4_interfaces():
     '''
     Provide a dict of the connected interfaces and their ip4 addresses
+    The addresses will be passed as a list for each interface
     '''
     # Provides:
     #   ip_interfaces
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     ret = {}
@@ -1527,11 +1566,12 @@ def ip4_interfaces():
 def ip6_interfaces():
     '''
     Provide a dict of the connected interfaces and their ip6 addresses
+    The addresses will be passed as a list for each interface
     '''
     # Provides:
     #   ip_interfaces
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     ret = {}
@@ -1656,7 +1696,7 @@ def saltversioninfo():
     # Provides:
     #   saltversioninfo
     from salt.version import __version_info__
-    return {'saltversioninfo': __version_info__}
+    return {'saltversioninfo': list(__version_info__)}
 
 
 def _hw_data(osdata):
@@ -1674,7 +1714,7 @@ def _hw_data(osdata):
     .. versionadded:: 0.9.5
     '''
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     grains = {}
@@ -1763,7 +1803,7 @@ def _smartos_zone_data():
     #   hypervisor_uuid
     #   datacenter
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
 
     grains = {}
@@ -1815,7 +1855,7 @@ def get_server_id():
     # Provides:
     #   server_id
 
-    if 'proxyminion' in __opts__:
+    if salt.utils.is_proxy():
         return {}
     return {'server_id': abs(hash(__opts__.get('id', '')) % (2 ** 31))}
 

@@ -30,6 +30,7 @@ from salt.ext.six.moves.urllib.parse import urlparse  # pylint: disable=import-e
 
 # Let's define these custom logging levels before importing the salt.log.mixins
 # since they will be used there
+PROFILE = logging.PROFILE = 15
 TRACE = logging.TRACE = 5
 GARBAGE = logging.GARBAGE = 1
 QUIET = logging.QUIET = 1000
@@ -47,6 +48,7 @@ LOG_LEVELS = {
     'critical': logging.CRITICAL,
     'garbage': GARBAGE,
     'info': logging.INFO,
+    'profile': PROFILE,
     'quiet': QUIET,
     'trace': TRACE,
     'warning': logging.WARNING,
@@ -60,6 +62,7 @@ LOG_COLORS = {
         'ERROR': TextFormat('bold', 'red'),
         'WARNING': TextFormat('bold', 'yellow'),
         'INFO': TextFormat('bold', 'green'),
+        'PROFILE': TextFormat('bold', 'cyan'),
         'DEBUG': TextFormat('bold', 'cyan'),
         'TRACE': TextFormat('bold', 'magenta'),
         'GARBAGE': TextFormat('bold', 'blue'),
@@ -71,6 +74,7 @@ LOG_COLORS = {
         'ERROR': TextFormat('red'),
         'WARNING': TextFormat('yellow'),
         'INFO': TextFormat('green'),
+        'PROFILE': TextFormat('bold', 'cyan'),
         'DEBUG': TextFormat('cyan'),
         'TRACE': TextFormat('magenta'),
         'GARBAGE': TextFormat('blue'),
@@ -137,24 +141,25 @@ class SaltLogRecord(logging.LogRecord):
         # pylint: enable=E1321
 
 
-class SaltColorLogRecord(logging.LogRecord):
+class SaltColorLogRecord(SaltLogRecord):
     def __init__(self, *args, **kwargs):
-        logging.LogRecord.__init__(self, *args, **kwargs)
+        SaltLogRecord.__init__(self, *args, **kwargs)
+
         reset = TextFormat('reset')
+        clevel = LOG_COLORS['levels'].get(self.levelname, reset)
+        cmsg = LOG_COLORS['msgs'].get(self.levelname, reset)
 
         # pylint: disable=E1321
         self.colorname = '%s[%-17s]%s' % (LOG_COLORS['name'],
                                           self.name,
                                           reset)
-        self.colorlevel = '%s[%-8s]%s' % (LOG_COLORS['levels'][self.levelname],
+        self.colorlevel = '%s[%-8s]%s' % (clevel,
                                           self.levelname,
                                           TextFormat('reset'))
         self.colorprocess = '%s[%5s]%s' % (LOG_COLORS['process'],
                                            self.process,
                                            reset)
-        self.colormsg = '%s%s%s' % (LOG_COLORS['msgs'][self.levelname],
-                                    self.msg,
-                                    reset)
+        self.colormsg = '%s%s%s' % (cmsg, self.getMessage(), reset)
         # pylint: enable=E1321
 
 
@@ -328,6 +333,7 @@ if logging.getLoggerClass() is not SaltLoggingClass:
 
     logging.setLoggerClass(SaltLoggingClass)
     logging.addLevelName(QUIET, 'QUIET')
+    logging.addLevelName(PROFILE, 'PROFILE')
     logging.addLevelName(TRACE, 'TRACE')
     logging.addLevelName(GARBAGE, 'GARBAGE')
 

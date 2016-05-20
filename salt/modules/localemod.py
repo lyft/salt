@@ -32,9 +32,9 @@ def __virtual__():
     Only work on POSIX-like systems
     '''
     if HAS_DBUS is False and _uses_dbus():
-        return False
+        return (False, 'Cannot load locale module: dbus python module unavailable')
     if salt.utils.is_windows():
-        return False
+        return (False, 'Cannot load locale module: windows platforms are unsupported')
 
     return __virtualname__
 
@@ -125,6 +125,8 @@ def get_locale():
         return _locale_get()
     elif 'RedHat' in __grains__['os_family']:
         cmd = 'grep "^LANG=" /etc/sysconfig/i18n'
+    elif 'Suse' in __grains__['os_family']:
+        cmd = 'grep "^RC_LANG" /etc/sysconfig/language'
     elif 'Debian' in __grains__['os_family']:
         cmd = 'grep "^LANG=" /etc/default/locale'
     elif 'Gentoo' in __grains__['os_family']:
@@ -156,6 +158,15 @@ def set_locale(locale):
             '/etc/sysconfig/i18n',
             '^LANG=.*',
             'LANG="{0}"'.format(locale),
+            append_if_not_found=True
+        )
+    elif 'Suse' in __grains__['os_family']:
+        if not __salt__['file.file_exists']('/etc/sysconfig/language'):
+            __salt__['file.touch']('/etc/sysconfig/language')
+        __salt__['file.replace'](
+            '/etc/sysconfig/language',
+            '^RC_LANG=.*',
+            'RC_LANG="{0}"'.format(locale),
             append_if_not_found=True
         )
     elif 'Debian' in __grains__['os_family']:
@@ -227,22 +238,19 @@ def gen_locale(locale, **kwargs):
     on_ubuntu = __grains__.get('os') == 'Ubuntu'
     on_gentoo = __grains__.get('os_family') == 'Gentoo'
     on_suse = __grains__.get('os_family') == 'Suse'
+
     locale_info = salt.utils.locales.split_locale(locale)
+
+    # if the charmap has not been supplied, normalize by appening it
+    if not locale_info['charmap'] and not on_ubuntu:
+        locale_info['charmap'] = locale_info['codeset']
+        locale = salt.utils.locales.join_locale(locale_info)
 
     if on_debian or on_gentoo:  # file-based search
         search = '/usr/share/i18n/SUPPORTED'
-
-        def search_locale():
-            return __salt__['file.search'](search,
-                                           '^{0}$'.format(locale),
-                                           flags=re.MULTILINE)
-
-        valid = search_locale()
-        if not valid and not locale_info['charmap']:
-            # charmap was not supplied, so try copying the codeset
-            locale_info['charmap'] = locale_info['codeset']
-            locale = salt.utils.locales.join_locale(locale_info)
-            valid = search_locale()
+        valid = __salt__['file.search'](search,
+                                        '^{0}$'.format(locale),
+                                        flags=re.MULTILINE)
     else:  # directory-based search
         if on_suse:
             search = '/usr/share/locale'
@@ -265,7 +273,7 @@ def gen_locale(locale, **kwargs):
         __salt__['file.replace'](
             '/etc/locale.gen',
             r'^\s*#\s*{0}\s*$'.format(locale),
-            '{0}\\n'.format(locale),
+            '{0}\n'.format(locale),
             append_if_not_found=True
         )
     elif on_ubuntu:
@@ -289,7 +297,9 @@ def gen_locale(locale, **kwargs):
                '-i', "{0}_{1}".format(locale_info['language'],
                                       locale_info['territory']),
                '-f', locale_info['codeset'],
-               locale]
+               '{0}_{1}.{2}'.format(locale_info['language'],
+                                    locale_info['territory'],
+                                    locale_info['codeset'])]
         cmd.append(kwargs.get('verbose', False) and '--verbose' or '--quiet')
     else:
         raise CommandExecutionError(

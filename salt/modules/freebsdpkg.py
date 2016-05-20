@@ -2,6 +2,12 @@
 '''
 Remote package support using ``pkg_add(1)``
 
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
+
 .. warning::
 
     This module has been completely rewritten. Up to and including version
@@ -190,7 +196,7 @@ def latest_version(*names, **kwargs):
     return '' if len(names) == 1 else dict((x, '') for x in names)
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def version(*names, **kwargs):
@@ -455,9 +461,9 @@ def remove(name=None, pkgs=None, **kwargs):
     return salt.utils.compare_dicts(old, new)
 
 # Support pkg.delete to remove packages to more closely match pkg_delete
-delete = remove
+delete = salt.utils.alias_function(remove, 'delete')
 # No equivalent to purge packages, use remove instead
-purge = remove
+purge = salt.utils.alias_function(remove, 'purge')
 
 
 def _rehash():
@@ -465,9 +471,9 @@ def _rehash():
     Recomputes internal hash table for the PATH variable. Use whenever a new
     command is created during the current session.
     '''
-    shell = __salt__['environ.get']('SHELL', output_loglevel='trace')
+    shell = __salt__['environ.get']('SHELL')
     if shell.split('/')[-1] in ('csh', 'tcsh'):
-        __salt__['cmd.run']('rehash', output_loglevel='trace')
+        __salt__['cmd.shell']('rehash', output_loglevel='trace')
 
 
 def file_list(*packages):

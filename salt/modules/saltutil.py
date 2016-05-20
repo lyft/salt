@@ -94,6 +94,7 @@ def _sync(form, saltenv=None):
     remote = set()
     source = salt.utils.url.create('_' + form)
     mod_dir = os.path.join(__opts__['extension_modules'], '{0}'.format(form))
+    cumask = os.umask(0o77)
     if not os.path.isdir(mod_dir):
         log.info('Creating module dir {0!r}'.format(mod_dir))
         try:
@@ -168,6 +169,7 @@ def _sync(form, saltenv=None):
             os.remove(os.path.join(__opts__['cachedir'], 'grains.cache.p'))
         except OSError:
             log.error('Could not remove grains cache!')
+    os.umask(cumask)
     return ret
 
 
@@ -272,6 +274,25 @@ def sync_beacons(saltenv=None, refresh=True):
     ret = _sync('beacons', saltenv)
     if refresh:
         refresh_beacons()
+    return ret
+
+
+def sync_sdb(saltenv=None, refresh=False):
+    '''
+    Sync sdb modules from the _sdb directory on the salt master file
+    server. This function is environment aware, pass the desired environment
+    to grab the contents of the _sdb directory, base is the default
+    environment.
+
+    .. versionadded:: 2015.5.7
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' saltutil.sync_sdb
+    '''
+    ret = _sync('sdb', saltenv)
     return ret
 
 
@@ -390,23 +411,44 @@ def sync_returners(saltenv=None, refresh=True):
     return ret
 
 
-def sync_outputters(saltenv=None, refresh=True):
+def sync_proxymodules(saltenv=None, refresh=False):
     '''
-    Sync the outputters from the _outputters directory on the salt master file
+    Sync the proxy modules from the _proxy directory on the salt master file
     server. This function is environment aware, pass the desired environment
-    to grab the contents of the _outputters directory, base is the default
+    to grab the contents of the _returners directory, base is the default
     environment.
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' saltutil.sync_outputters
+        salt '*' saltutil.sync_proxymodules
     '''
-    ret = _sync('outputters', saltenv)
+    ret = _sync('proxy', saltenv)
     if refresh:
         refresh_modules()
     return ret
+
+
+def sync_output(saltenv=None, refresh=True):
+    '''
+    Sync the output modules from the _output directory on the salt master file
+    server. This function is environment aware. Pass the desired environment
+    to grab the contents of the _output directory. Base is the default
+    environment.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' saltutil.sync_output
+    '''
+    ret = _sync('output', saltenv)
+    if refresh:
+        refresh_modules()
+    return ret
+
+sync_outputters = salt.utils.alias_function(sync_output, 'sync_outputters')
 
 
 def sync_utils(saltenv=None, refresh=True):
@@ -453,7 +495,7 @@ def sync_all(saltenv=None, refresh=True):
     '''
     Sync down all of the dynamic modules from the file server for a specific
     environment. This function synchronizes custom modules, states, beacons,
-    grains, returners, outputters, renderers, and utils.
+    grains, returners, output modules, renderers, and utils.
 
     refresh : True
         Also refresh the execution modules available to the minion.
@@ -486,12 +528,14 @@ def sync_all(saltenv=None, refresh=True):
     ret['beacons'] = sync_beacons(saltenv, False)
     ret['modules'] = sync_modules(saltenv, False)
     ret['states'] = sync_states(saltenv, False)
+    ret['sdb'] = sync_sdb(saltenv, False)
     ret['grains'] = sync_grains(saltenv, False)
     ret['renderers'] = sync_renderers(saltenv, False)
     ret['returners'] = sync_returners(saltenv, False)
-    ret['outputters'] = sync_outputters(saltenv, False)
+    ret['output'] = sync_output(saltenv, False)
     ret['utils'] = sync_utils(saltenv, False)
     ret['log_handlers'] = sync_log_handlers(saltenv, False)
+    ret['proxymodules'] = sync_proxymodules(saltenv, False)
     if refresh:
         refresh_modules()
     return ret
@@ -532,7 +576,7 @@ def refresh_pillar():
         ret = False  # Effectively a no-op, since we can't really return without an event system
     return ret
 
-pillar_refresh = refresh_pillar
+pillar_refresh = salt.utils.alias_function(refresh_pillar, 'pillar_refresh')
 
 
 def refresh_modules(async=True):
@@ -625,13 +669,49 @@ def clear_cache():
 
 def find_job(jid):
     '''
-    Return the data for a specific job id
+    Return the data for a specific job id that is currently running.
+
+    jid
+        The job id to search for and return data.
 
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' saltutil.find_job <job id>
+
+    Note that the find_job function only returns job information when the job is still running. If
+    the job is currently running, the output looks something like this:
+
+    .. code-block:: bash
+
+        # salt my-minion saltutil.find_job 20160503150049487736
+        my-minion:
+            ----------
+            arg:
+                - 30
+            fun:
+                test.sleep
+            jid:
+                20160503150049487736
+            pid:
+                9601
+            ret:
+            tgt:
+                my-minion
+            tgt_type:
+                glob
+            user:
+                root
+
+    If the job has already completed, the job cannot be found and therefore the function returns
+    an empty dictionary, which looks like this on the CLI:
+
+    .. code-block:: bash
+
+        # salt my-minion saltutil.find_job 20160503150049487736
+        my-minion:
+            ----------
     '''
     for data in running():
         if data['jid'] == jid:
@@ -653,7 +733,11 @@ def find_cached_job(jid):
     proc_dir = os.path.join(__opts__['cachedir'], 'minion_jobs')
     job_dir = os.path.join(proc_dir, str(jid))
     if not os.path.isdir(job_dir):
-        return
+        if not __opts__.get('cache_jobs'):
+            return ('Local jobs cache directory not found; you may need to'
+                    ' enable cache_jobs on this minion')
+        else:
+            return 'Local jobs cache directory {0} not found'.format(job_dir)
     path = os.path.join(job_dir, 'return.p')
     with salt.utils.fopen(path, 'rb') as fp_:
         buf = fp_.read()
@@ -789,18 +873,18 @@ def _get_ssh_or_api_client(cfgfile, ssh=False):
 
 
 def _exec(client, tgt, fun, arg, timeout, expr_form, ret, kwarg, **kwargs):
-    ret = {}
+    fcn_ret = {}
     seen = 0
     for ret_comp in client.cmd_iter(
             tgt, fun, arg, timeout, expr_form, ret, kwarg, **kwargs):
-        ret.update(ret_comp)
+        fcn_ret.update(ret_comp)
         seen += 1
-        # ret can be empty, so we cannot len the whole return dict
+        # fcn_ret can be empty, so we cannot len the whole return dict
         if expr_form == 'list' and len(tgt) == seen:
             # do not wait for timeout when explicit list matching
             # and all results are there
             break
-    return ret
+    return fcn_ret
 
 
 def cmd(tgt,
@@ -823,21 +907,21 @@ def cmd(tgt,
     '''
     cfgfile = __opts__['conf_file']
     client = _get_ssh_or_api_client(cfgfile, ssh)
-    ret = _exec(
+    fcn_ret = _exec(
         client, tgt, fun, arg, timeout, expr_form, ret, kwarg, **kwargs)
     # if return is empty, we may have not used the right conf,
     # try with the 'minion relative master configuration counter part
     # if available
     master_cfgfile = '{0}master'.format(cfgfile[:-6])  # remove 'minion'
     if (
-        not ret
+        not fcn_ret
         and cfgfile.endswith('{0}{1}'.format(os.path.sep, 'minion'))
         and os.path.exists(master_cfgfile)
     ):
         client = _get_ssh_or_api_client(master_cfgfile, ssh)
-        ret = _exec(
+        fcn_ret = _exec(
             client, tgt, fun, arg, timeout, expr_form, ret, kwarg, **kwargs)
-    return ret
+    return fcn_ret
 
 
 def cmd_iter(tgt,
@@ -880,8 +964,9 @@ def runner(_fun, **kwargs):
 
     .. versionadded:: 2014.7.0
 
-    name
+    _fun
         The name of the function to run
+
     kwargs
         Any keyword arguments to pass to the runner function
 

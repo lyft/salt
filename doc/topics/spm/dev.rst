@@ -27,7 +27,7 @@ By default, the package database is stored using the ``sqlite3`` module. This
 module was chosen because support for SQLite3 is built into Python itself.
 
 Modules for managing the package database are stored in the ``salt/spm/pkgdb/``
-directory. A number of functions must exist to support database managment.
+directory. A number of functions must exist to support database management.
 
 
 init()
@@ -132,7 +132,7 @@ The arguments that are passed in, in order, are ``name`` (required), ``pkg``
 
 ``name`` is the path of the file, as it was installed on the filesystem.
 
-``pkg`` is the name of the package that the file belongs to. 
+``pkg`` is the name of the package that the file belongs to.
 
 ``conn`` is the connection object returned from ``init()``.
 
@@ -154,7 +154,7 @@ installed on.
 
 Modules for managing the package database are stored in the
 ``salt/spm/pkgfiles/`` directory. A number of functions must exist to support
-file managment.
+file management.
 
 init()
 ``````

@@ -219,7 +219,8 @@ def minion_config(opts, vm_):
     # Some default options are Null, let's set a reasonable default
     minion.update(
         log_level='info',
-        log_level_logfile='info'
+        log_level_logfile='info',
+        hash_type='sha256'
     )
 
     # Now, let's update it to our needs
@@ -295,8 +296,13 @@ def bootstrap(vm_, opts):
     Windows) to install Salt. It will make the decision on its own as to which
     deploy function to call.
     '''
-    if salt.config.get_cloud_config_value('deploy', vm_, opts) is False \
-            and not salt.config.get_cloud_config_value('inline_script', vm_, opts):
+    deploy_config = salt.config.get_cloud_config_value(
+        'deploy',
+        vm_, opts, default=False)
+    inline_script_config = salt.config.get_cloud_config_value(
+        'inline_script',
+        vm_, opts, default=None)
+    if deploy_config is False and inline_script_config is None:
         return {
             'Error': {
                 'No Deploy': '\'deploy\' is not enabled. Not deploying.'
@@ -313,9 +319,10 @@ def bootstrap(vm_, opts):
             )
         )
     has_ssh_agent = False
-    if opts.get('ssh_agent', False) and 'SSH_AUTH_SOCK' in os.environ:
-        if stat.S_ISSOCK(os.stat(os.environ['SSH_AUTH_SOCK']).st_mode):
-            has_ssh_agent = True
+    if (opts.get('ssh_agent', False) and
+            'SSH_AUTH_SOCK' in os.environ and
+            stat.S_ISSOCK(os.stat(os.environ['SSH_AUTH_SOCK']).st_mode)):
+        has_ssh_agent = True
 
     if (key_filename is None and
             salt.config.get_cloud_config_value(
@@ -342,10 +349,6 @@ def bootstrap(vm_, opts):
         vm_, opts, minion_conf
     )
 
-    inline_script_code = salt.config.get_cloud_config_value(
-        'inline_script', vm_, opts, default=None
-        )
-
     ssh_username = salt.config.get_cloud_config_value(
         'ssh_username', vm_, opts, default='root'
     )
@@ -364,7 +367,7 @@ def bootstrap(vm_, opts):
         'salt_host': vm_.get('salt_host', vm_['ssh_host']),
         'username': ssh_username,
         'script': deploy_script_code,
-        'inline_script': inline_script_code,
+        'inline_script': inline_script_config,
         'name': vm_['name'],
         'has_ssh_agent': has_ssh_agent,
         'tmp_dir': salt.config.get_cloud_config_value(
@@ -461,6 +464,9 @@ def bootstrap(vm_, opts):
         deploy_kwargs['use_winrm'] = salt.config.get_cloud_config_value(
             'use_winrm', vm_, opts, default=False
         )
+        deploy_kwargs['winrm_port'] = salt.config.get_cloud_config_value(
+            'winrm_port', vm_, opts, default=5986
+        )
 
     # Store what was used to the deploy the VM
     event_kwargs = copy.deepcopy(deploy_kwargs)
@@ -480,27 +486,19 @@ def bootstrap(vm_, opts):
         transport=opts.get('transport', 'zeromq')
     )
 
-    deployed = False
-    inline_script_deployed = False
-
-    if salt.config.get_cloud_config_value('inline_script', vm_, opts) \
-            and salt.config.get_cloud_config_value('deploy', vm_, opts) is False:
-
-        if inline_script_code:
-            inline_script_deployed = run_inline_script(**inline_script_kwargs)
-            if inline_script_deployed is not False:
-                log.info('Inline script(s) ha(s|ve) run on {0}'.format(vm_['name']))
+    if inline_script_config and deploy_config is False:
+        inline_script_deployed = run_inline_script(**inline_script_kwargs)
+        if inline_script_deployed is not False:
+            log.info('Inline script(s) ha(s|ve) run on {0}'.format(vm_['name']))
         ret['deployed'] = False
         return ret
-
     else:
-
         if win_installer:
             deployed = deploy_windows(**deploy_kwargs)
         else:
             deployed = deploy_script(**deploy_kwargs)
 
-        if inline_script_code:
+        if inline_script_config:
             inline_script_deployed = run_inline_script(**inline_script_kwargs)
             if inline_script_deployed is not False:
                 log.info('Inline script(s) ha(s|ve) run on {0}'.format(vm_['name']))
@@ -591,6 +589,7 @@ def wait_for_port(host, port=22, timeout=900, gateway=None):
     # we first want to test the gateway before the host.
     test_ssh_host = host
     test_ssh_port = port
+
     if gateway:
         ssh_gateway = gateway['ssh_gateway']
         ssh_gateway_port = 22
@@ -616,7 +615,13 @@ def wait_for_port(host, port=22, timeout=900, gateway=None):
     while True:
         trycount += 1
         try:
+            if socket.inet_pton(socket.AF_INET6, host):
+                sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+            else:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        except socket.error:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
             sock.settimeout(30)
             sock.connect((test_ssh_host, int(test_ssh_port)))
             # Stop any remaining reads/writes on the socket
@@ -816,6 +821,7 @@ def wait_for_winrm(host, port, username, password, timeout=900):
                     host, port, trycount
                 )
             )
+            time.sleep(1)
 
 
 def validate_windows_cred(host,
@@ -938,6 +944,7 @@ def deploy_windows(host,
                    opts=None,
                    master_sign_pub_file=None,
                    use_winrm=False,
+                   winrm_port=5986,
                    **kwargs):
     '''
     Copy the install files to a remote Windows box, and execute them
@@ -962,7 +969,7 @@ def deploy_windows(host,
     winrm_session = None
 
     if HAS_WINRM and use_winrm:
-        winrm_session = wait_for_winrm(host=host, port=5986,
+        winrm_session = wait_for_winrm(host=host, port=winrm_port,
                                            username=username, password=password,
                                            timeout=port_timeout * 60)
         if winrm_session is not None:
@@ -1184,7 +1191,6 @@ def deploy_script(host,
 
     if wait_for_port(host=host, port=port, gateway=gateway):
         log.debug('SSH port {0} on {1} is available'.format(port, host))
-        newtimeout = timeout - (time.mktime(time.localtime()) - starttime)
         if wait_for_passwd(host, port=port, username=username,
                            password=password, key_filename=key_filename,
                            ssh_timeout=ssh_timeout,
@@ -1197,7 +1203,6 @@ def deploy_script(host,
                     host, port, username
                 )
             )
-            newtimeout = timeout - (time.mktime(time.localtime()) - starttime)
             ssh_kwargs = {
                 'hostname': host,
                 'port': port,
@@ -1224,7 +1229,7 @@ def deploy_script(host,
                                tty, sudo, **ssh_kwargs)
                 if ret:
                     raise SaltCloudSystemExit(
-                        'Cant create temporary '
+                        'Can\'t create temporary '
                         'directory in {0} !'.format(tmp_dir)
                     )
             if sudo:
@@ -1830,11 +1835,20 @@ def scp_file(dest_path, contents=None, kwargs=None, local_file=None):
                 ssh_gateway_port
             )
         )
+
+    try:
+        if socket.inet_pton(socket.AF_INET6, kwargs['hostname']):
+            ipaddr = '[{0}]'.format(kwargs['hostname'])
+        else:
+            ipaddr = kwargs['hostname']
+    except socket.error:
+        ipaddr = kwargs['hostname']
+
     cmd = (
-        'scp {0} {1} {2[username]}@{2[hostname]}:{3} || '
-        'echo "put {1} {3}" | sftp {0} {2[username]}@{2[hostname]} || '
+        'scp {0} {1} {2[username]}@{4}:{3} || '
+        'echo "put {1} {3}" | sftp {0} {2[username]}@{4} || '
         'rsync -avz -e "ssh {0}" {1} {2[username]}@{2[hostname]}:{3}'.format(
-            ' '.join(ssh_args), tmppath, kwargs, dest_path
+            ' '.join(ssh_args), tmppath, kwargs, dest_path, ipaddr
         )
     )
 
@@ -1932,8 +1946,16 @@ def sftp_file(dest_path, contents=None, kwargs=None, local_file=None):
             )
         )
 
-    cmd = 'echo "put {0} {1} {2}" | sftp {3} {4[username]}@{4[hostname]}'.format(
-        ' '.join(put_args), tmppath, dest_path, ' '.join(ssh_args), kwargs
+    try:
+        if socket.inet_pton(socket.AF_INET6, kwargs['hostname']):
+            ipaddr = '[{0}]'.format(kwargs['hostname'])
+        else:
+            ipaddr = kwargs['hostname']
+    except socket.error:
+        ipaddr = kwargs['hostname']
+
+    cmd = 'echo "put {0} {1} {2}" | sftp {3} {4[username]}@{5}'.format(
+        ' '.join(put_args), tmppath, dest_path, ' '.join(ssh_args), kwargs, ipaddr
     )
     log.debug('SFTP command: {0!r}'.format(cmd))
     retcode = _exec_ssh_cmd(cmd,
@@ -2345,6 +2367,44 @@ def list_nodes_select(nodes, selection, call=None):
     return ret
 
 
+def lock_file(filename, interval=.5, timeout=15):
+    '''
+    Lock a file; if it is already locked, then wait for it to become available
+    before locking it.
+
+    Note that these locks are only recognized by Salt Cloud, and not other
+    programs or platforms.
+    '''
+    log.trace('Attempting to obtain lock for {0}'.format(filename))
+    lock = filename + '.lock'
+    start = time.time()
+    while True:
+        if os.path.exists(lock):
+            if time.time() - start >= timeout:
+                log.warn('Unable to obtain lock for {0}'.format(filename))
+                return False
+            time.sleep(interval)
+        else:
+            break
+
+    salt.utils.fopen(lock, 'a').close()
+
+
+def unlock_file(filename):
+    '''
+    Unlock a locked file
+
+    Note that these locks are only recognized by Salt Cloud, and not other
+    programs or platforms.
+    '''
+    log.trace('Removing lock for {0}'.format(filename))
+    lock = filename + '.lock'
+    try:
+        os.remove(lock)
+    except OSError as exc:
+        log.trace('Unable to remove lock for {0}: {1}'.format(filename, exc))
+
+
 def cachedir_index_add(minion_id, profile, driver, provider, base=None):
     '''
     Add an entry to the cachedir index. This generally only needs to happen when
@@ -2362,6 +2422,7 @@ def cachedir_index_add(minion_id, profile, driver, provider, base=None):
     '''
     base = init_cachedir(base)
     index_file = os.path.join(base, 'index.p')
+    lock_file(index_file)
 
     if os.path.exists(index_file):
         with salt.utils.fopen(index_file, 'r') as fh_:
@@ -2383,6 +2444,8 @@ def cachedir_index_add(minion_id, profile, driver, provider, base=None):
     with salt.utils.fopen(index_file, 'w') as fh_:
         msgpack.dump(index, fh_)
 
+    unlock_file(index_file)
+
 
 def cachedir_index_del(minion_id, base=None):
     '''
@@ -2391,6 +2454,7 @@ def cachedir_index_del(minion_id, base=None):
     '''
     base = init_cachedir(base)
     index_file = os.path.join(base, 'index.p')
+    lock_file(index_file)
 
     if os.path.exists(index_file):
         with salt.utils.fopen(index_file, 'r') as fh_:
@@ -2403,6 +2467,8 @@ def cachedir_index_del(minion_id, base=None):
 
     with salt.utils.fopen(index_file, 'w') as fh_:
         msgpack.dump(index, fh_)
+
+    unlock_file(index_file)
 
 
 def init_cachedir(base=None):
@@ -2424,6 +2490,7 @@ def init_cachedir(base=None):
 
 def request_minion_cachedir(
         minion_id,
+        opts=None,
         fingerprint='',
         pubkey=None,
         provider=None,
@@ -2443,7 +2510,7 @@ def request_minion_cachedir(
 
     if not fingerprint:
         if pubkey is not None:
-            fingerprint = salt.utils.pem_finger(key=pubkey)
+            fingerprint = salt.utils.pem_finger(key=pubkey, sum_type=(opts and opts.get('hash_type') or 'sha256'))
 
     init_cachedir(base)
 
@@ -2581,13 +2648,11 @@ def update_bootstrap(config, url=None):
     '''
     Update the salt-bootstrap script
 
-        url can be either:
+    url can be one of:
 
-            - The URL to fetch the bootstrap script from
-            - The absolute path to the bootstrap
-            - The content of the bootstrap script
-
-
+        - The URL to fetch the bootstrap script from
+        - The absolute path to the bootstrap
+        - The content of the bootstrap script
     '''
     default_url = config.get('bootstrap_script_url',
                              'https://bootstrap.saltstack.com')
@@ -2783,7 +2848,7 @@ def missing_node_cache(prov_dir, node_list, provider, opts):
     '''
     cached_nodes = []
     for node in os.listdir(prov_dir):
-        cached_nodes.append(node.replace('.p', ''))
+        cached_nodes.append(os.path.splitext(node)[0])
 
     log.debug(sorted(cached_nodes))
     log.debug(sorted(node_list))

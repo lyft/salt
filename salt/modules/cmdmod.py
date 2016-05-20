@@ -36,6 +36,7 @@ try:
 except ImportError:
     pass
 
+__proxyenabled__ = ['*']
 # Define the module's virtual name
 __virtualname__ = 'cmd'
 
@@ -448,6 +449,10 @@ def _run(cmd,
             return ret
 
         out, err = proc.stdout, proc.stderr
+        if err is None:
+            # Will happen if redirect_stderr is True, since stderr was sent to
+            # stdout.
+            err = ''
 
         if rstrip:
             if out is not None:
@@ -588,10 +593,17 @@ def _run_all_quiet(cmd,
                    reset_system_locale=True,
                    saltenv='base',
                    pillarenv=None,
-                   pillar_override=None):
+                   pillar_override=None,
+                   output_loglevel=None):
+
     '''
     Helper for running commands quietly for minion startup.
-    Returns a dict of return data
+    Returns a dict of return data.
+
+    output_loglevel argument is ignored.  This is here for when we alias
+    cmd.run_all directly to _run_all_quiet in certain chicken-and-egg
+    situations where modules need to work both before and after
+    the __salt__ dictionary is populated (cf dracr.py)
     '''
     return _run(cmd,
                 runas=runas,
@@ -655,7 +667,7 @@ def run(cmd,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -954,7 +966,7 @@ def shell(cmd,
 
         This passes the cmd argument directly to the shell
         without any further processing! Be absolutely sure that you
-        have properly santized the command passed to this function
+        have properly sanitized the command passed to this function
         and do not use untrusted inputs.
 
     Note that ``env`` represents the environment variables for the command, and
@@ -1064,7 +1076,7 @@ def run_stdout(cmd,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -1247,7 +1259,7 @@ def run_stderr(cmd,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -1406,6 +1418,7 @@ def run_all(cmd,
             ignore_retcode=False,
             saltenv='base',
             use_vt=False,
+            redirect_stderr=False,
             **kwargs):
     '''
     Execute the passed command and return a dict of return data
@@ -1429,7 +1442,7 @@ def run_all(cmd,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -1504,6 +1517,14 @@ def run_all(cmd,
     Note that ``env`` represents the environment variables for the command, and
     should be formatted as a dict, or a YAML string which resolves to a dict.
 
+    redirect_stderr : False
+        If set to ``True``, then stderr will be redirected to stdout. This is
+        helpful for cases where obtaining both the retcode and output is
+        desired, but it is not desired to have the output separated into both
+        stdout and stderr.
+
+        .. versionadded:: 2015.8.2
+
     CLI Example:
 
     .. code-block:: bash
@@ -1528,10 +1549,12 @@ def run_all(cmd,
     '''
     python_shell = _python_shell_default(python_shell,
                                          kwargs.get('__pub_jid', ''))
+    stderr = subprocess.STDOUT if redirect_stderr else subprocess.PIPE
     ret = _run(cmd,
                runas=runas,
                cwd=cwd,
                stdin=stdin,
+               stderr=stderr,
                shell=shell,
                python_shell=python_shell,
                env=env,
@@ -1610,7 +1633,7 @@ def retcode(cmd,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -1844,7 +1867,7 @@ def script(source,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -2057,7 +2080,7 @@ def script_retcode(source,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env
@@ -2320,7 +2343,7 @@ def run_chroot(root,
         Shell to execute under. Defaults to the system default shell.
 
     python_shell
-        If True, let python handle the positional arguments. Set to False
+        If False, let python handle the positional arguments. Set to True
         to use shell features, such as pipes or redirection
 
     env

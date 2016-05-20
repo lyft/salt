@@ -44,7 +44,6 @@ __outputter__ = {
     'highstate': 'highstate',
     'template': 'highstate',
     'template_str': 'highstate',
-    'apply': 'highstate',
     'apply_': 'highstate',
     'request': 'highstate',
     'check_request': 'highstate',
@@ -70,6 +69,10 @@ def _set_retcode(ret):
     '''
     Set the return code based on the data back from the state system
     '''
+
+    # Set default retcode to 0
+    __context__['retcode'] = 0
+
     if isinstance(ret, list):
         __context__['retcode'] = 1
         return
@@ -103,9 +106,9 @@ def _wait(jid):
 
 def running(concurrent=False):
     '''
-    Return a list of strings that contain state return data if a state function is
-    already running. This function is used to prevent multiple state calls from being
-    run at the same time.
+    Return a list of strings that contain state return data if a state function
+    is already running. This function is used to prevent multiple state calls
+    from being run at the same time.
 
     CLI Example:
 
@@ -172,7 +175,9 @@ def _get_opts(localconfig=None):
 def low(data, queue=False, **kwargs):
     '''
     Execute a single low data call
-    This function is mostly intended for testing the state system
+
+    This function is mostly intended for testing the state system and is not
+    likely to be needed in everyday usage.
 
     CLI Example:
 
@@ -183,7 +188,10 @@ def low(data, queue=False, **kwargs):
     conflict = _check_queue(queue, kwargs)
     if conflict is not None:
         return conflict
-    st_ = salt.state.State(__opts__)
+    try:
+        st_ = salt.state.State(__opts__, proxy=__proxy__)
+    except NameError:
+        st_ = salt.state.State(__opts__)
     err = st_.verify_data(data)
     if err:
         __context__['retcode'] = 1
@@ -199,7 +207,9 @@ def low(data, queue=False, **kwargs):
 def high(data, test=False, queue=False, **kwargs):
     '''
     Execute the compound calls stored in a single set of high data
-    This function is mostly intended for testing the state system
+
+    This function is mostly intended for testing the state system andis not
+    likely to be needed in everyday usage.
 
     CLI Example:
 
@@ -224,7 +234,11 @@ def high(data, test=False, queue=False, **kwargs):
         raise SaltInvocationError(
             'Pillar data must be formatted as a dictionary'
         )
-    st_ = salt.state.State(__opts__, pillar)
+    try:
+        st_ = salt.state.State(__opts__, pillar, proxy=__proxy__)
+    except NameError:
+        st_ = salt.state.State(__opts__, pillar)
+
     ret = st_.call_high(data)
     _set_retcode(ret)
     return ret
@@ -283,7 +297,10 @@ def template_str(tem, queue=False, **kwargs):
     conflict = _check_queue(queue, kwargs)
     if conflict is not None:
         return conflict
-    st_ = salt.state.State(__opts__)
+    try:
+        st_ = salt.state.State(__opts__, proxy=__proxy__)
+    except NameError:
+        st_ = salt.state.State(__opts__)
     ret = st_.call_template_str(tem)
     _set_retcode(ret)
     return ret
@@ -294,17 +311,127 @@ def apply_(mods=None,
     '''
     .. versionadded:: 2015.5.0
 
-    Apply states! This function will call highstate or state.sls based on the
-    arguments passed in, state.apply is intended to be the main gateway for
-    all state executions.
+    This function will call :mod:`state.highstate
+    <salt.modules.state.highstate>` or :mod:`state.sls
+    <salt.modules.state.sls>` based on the arguments passed to this function.
+    It exists as a more intuitive way of applying states.
 
-    CLI Example:
+    .. rubric:: APPLYING ALL STATES CONFIGURED IN TOP.SLS (A.K.A. :ref:`HIGHSTATE <running-highstate>`)
+
+    To apply all configured states, simply run ``state.apply``:
 
     .. code-block:: bash
 
         salt '*' state.apply
+
+    The following additional arguments are also accepted when applying all
+    states configured in top.sls:
+
+    test
+        Run states in test-only (dry-run) mode
+
+    pillar
+        Custom Pillar values, passed as a dictionary of key-value pairs
+
+        .. code-block:: bash
+
+            salt '*' state.apply test pillar='{"foo": "bar"}'
+
+        .. note::
+            Values passed this way will override Pillar values set via
+            ``pillar_roots`` or an external Pillar source.
+
+    queue : False
+        Instead of failing immediately when another state run is in progress,
+        queue the new state run to begin running once the other has finished.
+
+        This option starts a new thread for each queued state run, so use this
+        option sparingly.
+
+    localconfig
+        Optionally, instead of using the minion config, load minion opts from
+        the file specified by this argument, and then merge them with the
+        options from the minion config. This functionality allows for specific
+        states to be run with their own custom minion configuration, including
+        different pillars, file_roots, etc.
+
+        .. code-block:: bash
+
+            salt '*' state.apply localconfig=/path/to/minion.yml
+
+
+    .. rubric:: APPLYING INDIVIDUAL SLS FILES (A.K.A. :py:func:`STATE.SLS <salt.modules.state.sls>`)
+
+    To apply individual SLS files, pass them as a comma-separated list:
+
+    .. code-block:: bash
+
+        # Run the states configured in salt://test.sls (or salt://test/init.sls)
         salt '*' state.apply test
+        # Run the states configured in salt://test.sls (or salt://test/init.sls)
+        # and salt://pkgs.sls (or salt://pkgs/init.sls).
         salt '*' state.apply test,pkgs
+
+    The following additional arguments are also accepted when applying
+    individual SLS files:
+
+    test
+        Run states in test-only (dry-run) mode
+
+    pillar
+        Custom Pillar values, passed as a dictionary of key-value pairs
+
+        .. code-block:: bash
+
+            salt '*' state.apply test pillar='{"foo": "bar"}'
+
+        .. note::
+            Values passed this way will override Pillar values set via
+            ``pillar_roots`` or an external Pillar source.
+
+    queue : False
+        Instead of failing immediately when another state run is in progress,
+        queue the new state run to begin running once the other has finished.
+
+        This option starts a new thread for each queued state run, so use this
+        option sparingly.
+
+    concurrent : False
+        Execute state runs concurrently instead of serially
+
+        .. warning::
+
+            This flag is potentially dangerous. It is designed for use when
+            multiple state runs can safely be run at the same time. Do *not*
+            use this flag for performance optimization.
+
+    saltenv : None
+        Specify a salt fileserver environment to be used when applying states
+
+        .. versionchanged:: 0.17.0
+            Argument name changed from ``env`` to ``saltenv``
+
+        .. versionchanged:: 2014.7.0
+            If no saltenv is specified, the minion config will be checked for a
+            ``saltenv`` parameter and if found, it will be used. If none is
+            found, ``base`` will be used. In prior releases, the minion config
+            was not checked and ``base`` would always be assumed when the
+            saltenv was not explicitly set.
+
+    pillarenv
+        Specify a Pillar environment to be used when applying states. By
+        default, all Pillar environments will be merged together and used.
+
+    localconfig
+        Optionally, instead of using the minion config, load minion opts from
+        the file specified by this argument, and then merge them with the
+        options from the minion config. This functionality allows for specific
+        states to be run with their own custom minion configuration, including
+        different pillars, file_roots, etc.
+
+        .. code-block:: bash
+
+            salt '*' state.apply test localconfig=/path/to/minion.yml
     '''
     if mods:
         return sls(mods, **kwargs)
@@ -455,26 +582,41 @@ def highstate(test=None,
     Retrieve the state data from the salt master for this minion and execute it
 
     test
-        Notify states to execute in test-only (dry-run) mode.
+        Run states in test-only (dry-run) mode
 
-        Sets the ``test`` variable in the minion ``opts`` for the duration of
-        the state run.
     pillar
-        Custom Pillar data can be passed with the ``pillar`` kwarg. Values
-        passed here will override hard-coded Pillar values.
-    queue : ``False``
+        Custom Pillar values, passed as a dictionary of key-value pairs
+
+        .. code-block:: bash
+
+            salt '*' state.apply test pillar='{"foo": "bar"}'
+
+        .. note::
+            Values passed this way will override Pillar values set via
+            ``pillar_roots`` or an external Pillar source.
+
+    queue : False
         Instead of failing immediately when another state run is in progress,
         queue the new state run to begin running once the other has finished.
 
-        This option starts a new thread for each queued state run so use this
+        This option starts a new thread for each queued state run, so use this
         option sparingly.
-    localconfig:
-        Instead of using running minion opts, load ``localconfig`` and merge that
-        with the running minion opts. This functionality is intended for using
-        "roots" of salt directories (with their own minion config, pillars,
-        file_roots) to run highstate out of.
 
-    CLI Example:
+    localconfig
+        Optionally, instead of using the minion config, load minion opts from
+        the file specified by this argument, and then merge them with the
+        options from the minion config. This functionality allows for specific
+        states to be run with their own custom minion configuration, including
+        different pillars, file_roots, etc.
+
+    mock:
+        The mock option allows for the state run to execute without actually
+        calling any states. This then returns a mocked return which will show
+        the requisite ordering as well as fully validate the state run.
+
+        .. versionadded:: 2015.8.4
+
+    CLI Examples:
 
     .. code-block:: bash
 
@@ -529,7 +671,18 @@ def highstate(test=None,
     if 'pillarenv' in kwargs:
         opts['pillarenv'] = kwargs['pillarenv']
 
-    st_ = salt.state.HighState(opts, pillar, kwargs.get('__pub_jid'))
+    try:
+        st_ = salt.state.HighState(opts,
+                                   pillar,
+                                   kwargs.get('__pub_jid'),
+                                   proxy=__proxy__,
+                                   mocked=kwargs.get('mock', False))
+    except NameError:
+        st_ = salt.state.HighState(opts,
+                                   pillar,
+                                   kwargs.get('__pub_jid'),
+                                   mocked=kwargs.get('mock', False))
+
     st_.push_active()
     try:
         ret = st_.call_highstate(
@@ -548,7 +701,6 @@ def highstate(test=None,
 
     serial = salt.payload.Serial(__opts__)
     cache_file = os.path.join(__opts__['cachedir'], 'highstate.p')
-
     _set_retcode(ret)
     # Work around Windows multiprocessing bug, set __opts__['test'] back to
     # value from before this function was run.
@@ -565,43 +717,69 @@ def sls(mods,
         pillarenv=None,
         **kwargs):
     '''
-    Execute a set list of state files from an environment.
+    Execute the states in one or more SLS files
 
     test
-        Notify states to execute in test-only (dry-run) mode.
+        Run states in test-only (dry-run) mode
 
-        Sets the ``test`` variable in the minion ``opts`` for the duration of
-        the state run.
     pillar
-        Custom Pillar data can be passed with the ``pillar`` kwarg. Values
-        passed here will override hard-coded Pillar values.
-    queue : ``False``
+        Custom Pillar values, passed as a dictionary of key-value pairs
+
+        .. code-block:: bash
+
+            salt '*' state.apply test pillar='{"foo": "bar"}'
+
+        .. note::
+            Values passed this way will override Pillar values set via
+            ``pillar_roots`` or an external Pillar source.
+
+    queue : False
         Instead of failing immediately when another state run is in progress,
         queue the new state run to begin running once the other has finished.
 
-        This option starts a new thread for each queued state run so use this
+        This option starts a new thread for each queued state run, so use this
         option sparingly.
+
+    concurrent : False
+        Execute state runs concurrently instead of serially
+
+        .. warning::
+
+            This flag is potentially dangerous. It is designed for use when
+            multiple state runs can safely be run at the same time. Do *not*
+            use this flag for performance optimization.
+
     saltenv : None
-        Specify a ``file_roots`` environment.
+        Specify a salt fileserver environment to be used when applying states
 
         .. versionchanged:: 0.17.0
-            Argument name changed from ``env`` to ``saltenv``.
-        .. versionchanged:: 2014.7
-            Defaults to None. If no saltenv is specified, the minion config will
-            be checked for a saltenv and if found, it will be used. If none is found,
-            base will be used.
-    pillarenv : None
-        Specify a ``pillar_roots`` environment. By default all pillar environments
-        merged together will be used.
-    concurrent:
-        WARNING: This flag is potentially dangerous. It is designed
-        for use when multiple state runs can safely be run at the same
-        Do not use this flag for performance optimization.
-    localconfig:
-        Instead of using running minion opts, load ``localconfig`` and merge that
-        with the running minion opts. This functionality is intended for using
-        "roots" of salt directories (with their own minion config, pillars,
-        file_roots) to run highstate out of.
+            Argument name changed from ``env`` to ``saltenv``
+
+        .. versionchanged:: 2014.7.0
+            If no saltenv is specified, the minion config will be checked for a
+            ``saltenv`` parameter and if found, it will be used. If none is
+            found, ``base`` will be used. In prior releases, the minion config
+            was not checked and ``base`` would always be assumed when the
+            saltenv was not explicitly set.
+
+    pillarenv
+        Specify a Pillar environment to be used when applying states. By
+        default, all Pillar environments will be merged together and used.
+
+    localconfig
+
+        Optionally, instead of using the minion config, load minion opts from
+        the file specified by this argument, and then merge them with the
+        options from the minion config. This functionality allows for specific
+        states to be run with their own custom minion configuration, including
+        different pillars, file_roots, etc.
+
+    mock:
+        The mock option allows for the state run to execute without actually
+        calling any states. This then returns a mocked return which will show
+        the requisite ordering as well as fully validate the state run.
+
+        .. versionadded:: 2015.8.4
 
     CLI Example:
 
@@ -681,13 +859,25 @@ def sls(mods,
             '{0}.cache.p'.format(kwargs.get('cache_name', 'highstate'))
             )
 
-    st_ = salt.state.HighState(opts, pillar, kwargs.get('__pub_jid'))
+    try:
+        st_ = salt.state.HighState(opts,
+                                   pillar,
+                                   kwargs.get('__pub_jid'),
+                                   proxy=__proxy__,
+                                   mocked=kwargs.get('mock', False))
+    except NameError:
+        st_ = salt.state.HighState(opts,
+                                   pillar,
+                                   kwargs.get('__pub_jid'),
+                                   mocked=kwargs.get('mock', False))
 
+    umask = os.umask(0o77)
     if kwargs.get('cache'):
         if os.path.isfile(cfn):
             with salt.utils.fopen(cfn, 'rb') as fp_:
                 high_ = serial.load(fp_)
                 return st_.state.call_high(high_)
+    os.umask(umask)
 
     if isinstance(mods, six.string_types):
         mods = mods.split(',')
@@ -723,12 +913,11 @@ def sls(mods,
     except (IOError, OSError):
         msg = 'Unable to write to SLS cache file {0}. Check permission.'
         log.error(msg.format(cache_file))
-
-    os.umask(cumask)
     _set_retcode(ret)
     # Work around Windows multiprocessing bug, set __opts__['test'] back to
     # value from before this function was run.
     __opts__['test'] = orig_test
+
     try:
         with salt.utils.fopen(cfn, 'w+b') as fp_:
             try:
@@ -739,6 +928,7 @@ def sls(mods,
     except (IOError, OSError):
         msg = 'Unable to write to highstate cache file {0}. Do you have permissions?'
         log.error(msg.format(cfn))
+    os.umask(cumask)
     return ret
 
 
@@ -748,15 +938,17 @@ def top(topfn,
         saltenv=None,
         **kwargs):
     '''
-    Execute a specific top file instead of the default
+    Execute a specific top file instead of the default. This is useful to apply
+    configurations from a different environment (for example, dev or prod), without
+    modifying the default top file.
 
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' state.top reverse_top.sls
-        salt '*' state.top reverse_top.sls exclude=sls_to_exclude
-        salt '*' state.top reverse_top.sls exclude="[{'id': 'id_to_exclude'}, {'sls': 'sls_to_exclude'}]"
+        salt '*' state.top prod_top.sls exclude=sls_to_exclude
+        salt '*' state.top dev_top.sls exclude="[{'id': 'id_to_exclude'}, {'sls': 'sls_to_exclude'}]"
     '''
     conflict = _check_queue(queue, kwargs)
     if conflict is not None:
@@ -826,8 +1018,7 @@ def show_highstate(queue=False, **kwargs):
         ret = st_.compile_highstate()
     finally:
         st_.pop_active()
-    if isinstance(ret, list):
-        __context__['retcode'] = 1
+    _set_retcode(ret)
     return ret
 
 
@@ -1104,7 +1295,10 @@ def single(fun, name, test=None, queue=False, **kwargs):
             'Pillar data must be formatted as a dictionary'
         )
 
-    st_ = salt.state.State(opts, pillar)
+    try:
+        st_ = salt.state.State(opts, pillar, proxy=__proxy__)
+    except NameError:
+        st_ = salt.state.State(opts, pillar)
     err = st_.verify_data(kwargs)
     if err:
         __context__['retcode'] = 1

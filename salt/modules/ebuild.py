@@ -2,6 +2,12 @@
 '''
 Support for Portage
 
+.. important::
+    If you feel that Salt should be using this module to manage packages on a
+    minion, and it is using a different module (or gives an error similar to
+    *'pkg.install' is not available*), see :ref:`here
+    <module-provider-override>`.
+
 :optdepends:    - portage Python adapter
 
 For now all package names *MUST* include the package category,
@@ -237,7 +243,7 @@ def latest_version(*names, **kwargs):
     return ret
 
 # available_version is being deprecated
-available_version = latest_version
+available_version = salt.utils.alias_function(latest_version, 'available_version')
 
 
 def _get_upgradable(backtrack=3):
@@ -646,7 +652,9 @@ def install(name=None,
                 if not changes:
                     inst_v = version(param)
 
-                    if latest_version(param) == inst_v:
+                    # Prevent latest_version from calling refresh_db. Either we
+                    # just called it or we were asked not to.
+                    if latest_version(param, refresh=False) == inst_v:
                         all_uses = __salt__['portage_config.get_cleared_flags'](param)
                         if _flags_changed(*all_uses):
                             changes[param] = {'version': inst_v,

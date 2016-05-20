@@ -3,8 +3,6 @@
 Set up the version of Salt
 '''
 
-# pylint: disable=incompatible-py3-code
-
 # Import python libs
 from __future__ import absolute_import, print_function
 import re
@@ -555,13 +553,14 @@ def dependency_information(include_salt_cloud=False):
         ('timelib', 'timelib', 'version'),
         ('dateutil', 'dateutil', '__version__'),
         ('pygit2', 'pygit2', '__version__'),
+        ('libgit2', 'pygit2', 'LIBGIT2_VERSION'),
         ('smmap', 'smmap', '__version__'),
         ('cffi', 'cffi', '__version__'),
         ('pycparser', 'pycparser', '__version__'),
         ('gitdb', 'gitdb', '__version__'),
-        ('gitpython', 'gitpython', '__version__'),
-        ('python-gnupg', 'python-gnupg', '__version__'),
-        ('mysql-python', 'mysql-python', '__version__'),
+        ('gitpython', 'git', '__version__'),
+        ('python-gnupg', 'gnupg', '__version__'),
+        ('mysql-python', 'MySQLdb', '__version__'),
         ('cherrypy', 'cherrypy', '__version__'),
     ]
 

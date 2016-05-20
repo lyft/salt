@@ -81,15 +81,16 @@ class SaltCloud(parsers.SaltCloudParser):
 
         if self.options.update_bootstrap:
             ret = salt.utils.cloud.update_bootstrap(self.config)
-            display_output = salt.output.get_printout(
-                self.options.output, self.config
-            )
-            print(display_output(ret))
+            salt.output.display_output(ret,
+                                       self.options.output,
+                                       opts=self.config)
             self.exit(salt.defaults.exitcodes.EX_OK)
 
         log.info('salt-cloud starting')
         try:
             mapper = salt.cloud.Map(self.config)
+        except SaltCloudSystemExit as exc:
+            self.handle_exception(exc.args, exc)
         except SaltCloudException as exc:
             msg = 'There was an error generating the mapper.'
             self.handle_exception(msg, exc)
@@ -342,7 +343,11 @@ class SaltCloud(parsers.SaltCloudParser):
 
                 if dmap.get('existing', None):
                     for name in dmap['existing']:
-                        ret[name] = {'Message': 'Already running'}
+                        if 'ec2' in dmap['existing'][name]['provider']:
+                            msg = 'Instance already exists, or is terminated and has the same name.'
+                        else:
+                            msg = 'Already running.'
+                        ret[name] = {'Message': msg}
 
             except (SaltCloudException, Exception) as exc:
                 msg = 'There was a query error: {0}'
@@ -351,11 +356,9 @@ class SaltCloud(parsers.SaltCloudParser):
         else:
             self.error('Nothing was done. Using the proper arguments?')
 
-        display_output = salt.output.get_printout(
-            self.options.output, self.config
-        )
-        # display output using salt's outputter system
-        print(display_output(ret))
+        salt.output.display_output(ret,
+                                   self.options.output,
+                                   opts=self.config)
         self.exit(salt.defaults.exitcodes.EX_OK)
 
     def print_confirm(self, msg):
@@ -370,7 +373,7 @@ class SaltCloud(parsers.SaltCloudParser):
 
     def handle_exception(self, msg, exc):
         if isinstance(exc, SaltCloudException):
-            # It's a know exception an we know own to handle it
+            # It's a known exception and we know how to handle it
             if isinstance(exc, SaltCloudSystemExit):
                 # This is a salt cloud system exit
                 if exc.exit_code > 0:

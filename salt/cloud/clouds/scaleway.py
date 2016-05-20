@@ -151,7 +151,7 @@ def list_nodes_full(call=None):
 
     items = query(method='servers')
 
-    # For each server, iterate on its paramters.
+    # For each server, iterate on its parameters.
     ret = {}
     for node in items['servers']:
         ret[node['name']] = {}
@@ -208,7 +208,8 @@ def create(server_):
         # Check for required profile parameters before sending any API calls.
         if server_['profile'] and config.is_profile_configured(__opts__,
                                                                __active_provider_name__ or 'scaleway',
-                                                               server_['profile']) is False:
+                                                               server_['profile'],
+                                                               vm_=server_) is False:
             return False
     except AttributeError:
         pass
@@ -236,10 +237,15 @@ def create(server_):
         'access_key', get_configured_provider(), __opts__, search_global=False
     )
 
+    commercial_type = config.get_cloud_config_value(
+        'commercial_type', server_, __opts__, default='C1'
+    )
+
     kwargs = {
         'name': server_['name'],
         'organization': access_key,
         'image': get_image(server_),
+        'commercial_type': commercial_type,
     }
 
     salt.utils.cloud.fire_event(
@@ -330,7 +336,7 @@ def query(method='servers', server_id=None, command=None, args=None,
         get_configured_provider(),
         __opts__,
         search_global=False,
-        default='https://api.scaleway.com'
+        default='https://api.cloud.online.net'
     ))
 
     path = '{0}/{1}/'.format(base_path, method)
@@ -359,7 +365,7 @@ def query(method='servers', server_id=None, command=None, args=None,
         raise SaltCloudSystemExit(
             'An error occurred while querying Scaleway. HTTP Code: {0}  '
             'Error: {1!r}'.format(
-                request.getcode(),
+                request.status_code,
                 request.text
             )
         )

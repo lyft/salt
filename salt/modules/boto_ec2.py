@@ -5,7 +5,7 @@ Connection module for Amazon EC2
 .. versionadded:: 2015.8.0
 
 :configuration: This module accepts explicit EC2 credentials but can also
-    utilize IAM roles assigned to the instance trough Instance Profiles.
+    utilize IAM roles assigned to the instance through Instance Profiles.
     Dynamic credentials are then automatically obtained from AWS API and no
     further configuration is necessary. More Information available at:
 
@@ -29,15 +29,15 @@ Connection module for Amazon EC2
 
     If a region is not specified, the default is us-east-1.
 
-    It's also possible to specify key, keyid and region via a profile, either
+    It's also possible to specify key, keyid, and region via a profile, either
     as a passed in dict, or as a string to pull from pillars or minion config:
 
     .. code-block:: yaml
 
         myprofile:
-            keyid: GKTADJGHEIQSXMKKRBJ08H
-            key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
-            region: us-east-1
+          keyid: GKTADJGHEIQSXMKKRBJ08H
+          key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+          region: us-east-1
 
 :depends: boto
 
@@ -83,7 +83,7 @@ def __virtual__():
     elif _LooseVersion(boto.__version__) < _LooseVersion(required_boto_version):
         return False
     else:
-        __utils__['boto.assign_funcs'](__name__, 'ec2')
+        __utils__['boto.assign_funcs'](__name__, 'ec2', pack=__salt__)
         return True
 
 
@@ -215,7 +215,9 @@ def exists(instance_id=None, name=None, tags=None, region=None, key=None,
 
         salt myminion boto_ec2.exists myinstance
     '''
-    instances = find_instances(instance_id=instance_id, name=name, tags=tags)
+    instances = find_instances(instance_id=instance_id, name=name, tags=tags,
+                               region=region, key=key, keyid=keyid,
+                               profile=profile)
     if instances:
         log.info('instance exists.')
         return True
@@ -406,7 +408,7 @@ def get_attribute(attribute, instance_name=None, instance_id=None, region=None, 
 
     .. code-block:: bash
 
-        salt myminion boto_ec2.get_attribute name=my_instance attribute=sourceDestCheck
+        salt myminion boto_ec2.get_attribute sourceDestCheck instance_name=my_instance
 
     Available attributes:
         * instanceType
@@ -459,8 +461,7 @@ def set_attribute(attribute, attribute_value, instance_name=None, instance_id=No
 
     .. code-block:: bash
 
-        salt myminion boto_ec2.set_attribute instance_name=my_instance \
-                attribute=sourceDestCheck attribute_value=False
+        salt myminion boto_ec2.set_attribute sourceDestCheck False instance_name=my_instance
 
     Available attributes:
         * instanceType

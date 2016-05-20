@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 '''
 Manage the password database on BSD systems
+
+.. important::
+    If you feel that Salt should be using this module to manage passwords on a
+    minion, and it is using a different module (or gives an error similar to
+    *'shadow.info' is not available*), see :ref:`here
+    <module-provider-override>`.
 '''
 
 # Import python libs
@@ -118,6 +124,24 @@ def set_expire(name, expire):
     post_info = info(name)
     if post_info['expire'] != pre_info['expire']:
         return post_info['expire'] == expire
+
+
+def del_password(name):
+    '''
+    .. versionadded:: 2015.8.2
+
+    Delete the password from name user
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' shadow.del_password username
+    '''
+    cmd = 'pw user mod {0} -w none'.format(name)
+    __salt__['cmd.run'](cmd, python_shell=False, output_loglevel='quiet')
+    uinfo = info(name)
+    return not uinfo['passwd']
 
 
 def set_password(name, password):

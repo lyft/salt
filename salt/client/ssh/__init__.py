@@ -32,6 +32,7 @@ import salt.log
 import salt.loader
 import salt.minion
 import salt.roster
+import salt.serializers.yaml
 import salt.state
 import salt.utils
 import salt.utils.args
@@ -168,6 +169,8 @@ class SSH(object):
         else:
             self.event = None
         self.opts = opts
+        if not salt.utils.which('ssh'):
+            raise salt.exceptions.SaltSystemExit('No ssh binary found in path -- ssh must be installed for salt-ssh to run. Exiting.')
         self.opts['_ssh_version'] = ssh_version()
         self.tgt_type = self.opts['selected_target_option'] \
                 if self.opts['selected_target_option'] else 'glob'
@@ -519,7 +522,10 @@ class SSH(object):
 
         # save load to the master job cache
         try:
-            self.returners['{0}.save_load'.format(self.opts['master_job_cache'])](jid, job_load)
+            if self.opts['master_job_cache'] == 'local_cache':
+                self.returners['{0}.save_load'.format(self.opts['master_job_cache'])](jid, job_load, minions=self.targets.keys())
+            else:
+                self.returners['{0}.save_load'.format(self.opts['master_job_cache'])](jid, job_load)
         except Exception as exc:
             log.error('Could not save load with returner {0}: {1}'.format(self.opts['master_job_cache'], exc))
 
@@ -543,6 +549,10 @@ class SSH(object):
 
             self.cache_job(jid, host, ret[host], fun)
             ret = self.key_deploy(host, ret)
+
+            if isinstance(ret[host], dict) and ret[host].get('stderr', '').startswith('ssh:'):
+                ret[host] = ret[host]['stderr']
+
             if not isinstance(ret[host], dict):
                 p_data = {host: ret[host]}
             elif 'return' not in ret[host]:
@@ -603,6 +613,7 @@ class Single(object):
         # Get mine setting and mine_functions if defined in kwargs (from roster)
         self.mine = mine
         self.mine_functions = kwargs.get('mine_functions')
+        self.cmd_umask = kwargs.get('cmd_umask', None)
 
         self.opts = opts
         self.tty = tty
@@ -655,7 +666,7 @@ class Single(object):
                     'sock_dir': '/',
                     'log_file': 'salt-call.log'
                 })
-        self.minion_config = yaml.dump(self.minion_opts)
+        self.minion_config = salt.serializers.yaml.serialize(self.minion_opts)
         self.target = kwargs
         self.target.update(args)
         self.serial = salt.payload.Serial(opts)
@@ -770,7 +781,7 @@ class Single(object):
                 fsclient=self.fsclient,
                 minion_opts=self.minion_opts,
                 **self.target)
-            opts_pkg = pre_wrapper['test.opts_pkg']()
+            opts_pkg = pre_wrapper['test.opts_pkg']()  # pylint: disable=E1102
             opts_pkg['file_roots'] = self.opts['file_roots']
             opts_pkg['pillar_roots'] = self.opts['pillar_roots']
             opts_pkg['ext_pillar'] = self.opts['ext_pillar']
@@ -787,9 +798,9 @@ class Single(object):
             retcode = 0
 
             if '_error' in opts_pkg:
-                # Refresh failed
-                ret = json.dumps({'local': opts_pkg})
+                #Refresh failed
                 retcode = opts_pkg['retcode']
+                ret = json.dumps({'local': opts_pkg['_error']})
                 return ret, retcode
 
             pillar = salt.pillar.Pillar(
@@ -901,7 +912,8 @@ OPTIONS.version = '{5}'
 OPTIONS.ext_mods = '{6}'
 OPTIONS.wipe = {7}
 OPTIONS.tty = {8}
-ARGS = {9}\n'''.format(self.minion_config,
+OPTIONS.cmd_umask = {9}
+ARGS = {10}\n'''.format(self.minion_config,
                          RSTR,
                          self.thin_dir,
                          thin_sum,
@@ -910,6 +922,7 @@ ARGS = {9}\n'''.format(self.minion_config,
                          self.mods.get('version', ''),
                          self.wipe,
                          self.tty,
+                         self.cmd_umask,
                          self.argv)
         py_code = SSH_PY_SHIM.replace('#%%OPTS', arg_str)
         py_code_enc = py_code.encode('base64')

@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 '''
 Manage users with the useradd command
+
+.. important::
+    If you feel that Salt should be using this module to manage users on a
+    minion, and it is using a different module (or gives an error similar to
+    *'user.info' is not available*), see :ref:`here
+    <module-provider-override>`.
 '''
 from __future__ import absolute_import
-
-# Import python libs
-import re
 
 try:
     import pwd
@@ -21,10 +24,6 @@ from salt.ext import six
 from salt.exceptions import CommandExecutionError
 
 log = logging.getLogger(__name__)
-
-RETCODE_12_ERROR_REGEX = re.compile(
-    r'userdel(.*)warning(.*)/var/mail(.*)No such file or directory'
-)
 
 # Define the module's virtual name
 __virtualname__ = 'user'
@@ -148,10 +147,9 @@ def add(name,
                         if 'group' not in line[:5]:
                             continue
 
-                        for val in line.split(' '):
-                            cmd.extend([
-                                '-g', str(val[1])
-                            ])
+                        cmd.extend([
+                            '-g', str(line.split()[-1])
+                        ])
 
                         # We found what we wanted, let's break out of the loop
                         break
@@ -159,12 +157,11 @@ def add(name,
                 # /etc/usermgmt.conf not present: defaults will be used
                 pass
 
-    if salt.utils.is_true(createhome):
-        if createhome:
-            cmd.append('-m')
-        elif (__grains__['kernel'] != 'NetBSD'
-                and __grains__['kernel'] != 'OpenBSD'):
-            cmd.append('-M')
+    if createhome:
+        cmd.append('-m')
+    elif (__grains__['kernel'] != 'NetBSD'
+            and __grains__['kernel'] != 'OpenBSD'):
+        cmd.append('-M')
 
     if home is not None:
         cmd.extend(['-d', home])
@@ -242,7 +239,7 @@ def delete(name, remove=False, force=False):
         if __grains__['os_family'] not in ('Debian',):
             return False
 
-        if RETCODE_12_ERROR_REGEX.match(ret['stderr']) is not None:
+        if 'var/mail' in ret['stderr'] or 'var/spool/mail' in ret['stderr']:
             # We've hit the bug, let's log it and not fail
             log.debug(
                 'While the userdel exited with code 12, this is a known bug on '

@@ -38,17 +38,34 @@ config:
 .. code-block:: yaml
 
     Ensure myrds RDS exists:
-        boto_rds.present:
-            - name: myrds
-            - allocated_storage: 5
-            - storage_type: gp2
-            - db_instance_class: db.t2.micro
-            - engine: MySQL
-            - master_username: myuser
-            - master_user_password: mypass
-            - region: us-east-1
-            - keyid: GKTADJGHEIQSXMKKRBJ08H
-            - key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+      boto_rds.present:
+        - name: myrds
+        - allocated_storage: 5
+        - db_instance_class: db.t2.micro
+        - engine: MySQL
+        - master_username: myuser
+        - master_user_password: mypass
+        - region: us-east-1
+        - keyid: GKTADJGHEIQSXMKKRBJ08H
+        - key: askdjghsdfjkghWupUjasdflkdfklgjsdfjajkghs
+        - tags:
+          -
+            - key1
+            - value1
+          -
+            - key2
+            - value2
+
+.. note::
+
+    This state module uses ``boto.rds2``, which requires a different tagging syntax than
+    some of the other boto states. The ``tags`` key and value set noted in the example
+    above is the required yaml notation that ``rds2`` depends upon to function properly.
+    For more information, please see `Issue #28715`_.
+
+.. _Issue #28715: https://github.com/saltstack/salt/issues/28715
+
+
 '''
 
 
@@ -59,17 +76,36 @@ def __virtual__():
     return 'boto_rds' if 'boto_rds.exists' in __salt__ else False
 
 
-def present(name, allocated_storage, storage_type, db_instance_class, engine,
-            master_username, master_user_password, db_name=None,
-            db_security_groups=None, vpc_security_group_ids=None,
-            availability_zone=None, db_subnet_group_name=None,
-            preferred_maintenance_window=None, db_parameter_group_name=None,
-            backup_retention_period=None, preferred_backup_window=None,
-            port=None, multi_az=None, engine_version=None,
-            auto_minor_version_upgrade=None, license_model=None, iops=None,
-            option_group_name=None, character_set_name=None,
-            publicly_accessible=None, wait_status=None, tags=None, region=None,
-            key=None, keyid=None, profile=None):
+def present(name,
+            allocated_storage,
+            db_instance_class,
+            engine,
+            master_username,
+            master_user_password,
+            db_name=None,
+            db_security_groups=None,
+            vpc_security_group_ids=None,
+            availability_zone=None,
+            db_subnet_group_name=None,
+            preferred_maintenance_window=None,
+            db_parameter_group_name=None,
+            backup_retention_period=None,
+            preferred_backup_window=None,
+            port=None,
+            multi_az=None,
+            engine_version=None,
+            auto_minor_version_upgrade=None,
+            license_model=None,
+            iops=None,
+            option_group_name=None,
+            character_set_name=None,
+            publicly_accessible=None,
+            wait_status=None,
+            tags=None,
+            region=None,
+            key=None,
+            keyid=None,
+            profile=None):
     '''
     Ensure RDS instance exists.
 
@@ -80,14 +116,15 @@ def present(name, allocated_storage, storage_type, db_instance_class, engine,
         The amount of storage (in gigabytes) to be initially allocated for the
         database instance.
 
-    storage_type
-        The storage type you want to use, available: standard, gp2 and io1
-
     db_instance_class
         The compute and memory capacity of the Amazon RDS DB instance.
 
     engine
-        The name of the database engine to be used for this instance.
+        The name of the database engine to be used for this instance. Supported
+        engine types are: MySQL, oracle-se1, oracle-se, oracle-ee, sqlserver-ee,
+        sqlserver-se, sqlserver-ex, sqlserver-web, and postgres. For more
+        information, please see the ``engine`` argument in the boto_rds
+        `create_dbinstance`_ documentation.
 
     master_username
         The name of master user for the client DB instance.
@@ -178,13 +215,15 @@ def present(name, allocated_storage, storage_type, db_instance_class, engine,
     profile
         A dict with region, key and keyid, or a pillar key (string) that
         contains a dict with region, key and keyid.
+
+    .. _create_dbinstance: http://boto.readthedocs.org/en/latest/ref/rds.html#boto.rds.RDSConnection.create_dbinstance
     '''
     ret = {'name': name,
            'result': True,
            'comment': '',
            'changes': {}
            }
-    _ret = _rds_present(name, allocated_storage, storage_type,
+    _ret = _rds_present(name, allocated_storage,
                         db_instance_class, engine,
                         master_username, master_user_password, db_name,
                         db_security_groups, vpc_security_group_ids,
@@ -204,7 +243,7 @@ def present(name, allocated_storage, storage_type, db_instance_class, engine,
     return ret
 
 
-def _rds_present(name, allocated_storage, storage_type, db_instance_class,
+def _rds_present(name, allocated_storage, db_instance_class,
                  engine, master_username, master_user_password, db_name=None,
                  db_security_groups=None, vpc_security_group_ids=None,
                  availability_zone=None, db_subnet_group_name=None,
@@ -228,7 +267,7 @@ def _rds_present(name, allocated_storage, storage_type, db_instance_class,
             ret['result'] = None
             return ret
         created = __salt__['boto_rds.create'](name, allocated_storage,
-                                              storage_type, db_instance_class,
+                                              db_instance_class,
                                               engine, master_username,
                                               master_user_password, db_name,
                                               db_security_groups,
@@ -271,9 +310,9 @@ def replica_present(name, source, db_instance_class=None, availability_zone=None
     .. code-block:: yaml
 
         Ensure myrds replica RDS exists:
-            boto_rds.create_replica:
-                - name: myreplica
-                - source: mydb
+          boto_rds.create_replica:
+            - name: myreplica
+            - source: mydb
     '''
     ret = {'name': name,
            'result': None,

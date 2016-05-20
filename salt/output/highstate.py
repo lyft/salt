@@ -29,17 +29,54 @@ state_output:
       error and no changes, otherwise full output will be used.
     * If ``filter`` is used, then either or both of two different filters can be
       used: ``exclude`` or ``terse``.
+      * for ``exclude``, state.highstate expects a list of states to be excluded
+        (or ``None``)
+        followed by ``True`` for terse output or ``False`` for regular output.
+        Because of parsing nuances, if only one of these is used, it must still
+        contain a comma. For instance: `exclude=True,`.
+      * for ``terse``, state.highstate expects simply ``True`` or ``False``.
       These can be set as such from the command line, or in the Salt config as
-      `state_output_exclude` or `state_output_terse`, respectively. The values to
-      exclude must be a comma-separated list of `True`, `False` and/or `None`.
-      Because of parsing nuances, if only one of these is used, it must still
-      contain a comma. For instance: `exclude=True,`.
+      `state_output_exclude` or `state_output_terse`, respectively.
 state_tabular:
     If `state_output` uses the terse output, set this to `True` for an aligned
     output format.  If you wish to use a custom format, this can be set to a
     string.
 
-Example output:
+Example usage:
+
+If ``state_output: filter`` is set in the configuration file:
+
+.. code-block:: bash
+
+    salt '*' state.highstate exclude=None,True
+
+
+means to exclude no states from the highstate and turn on terse output.
+
+.. code-block:: bash
+
+    salt twd state.highstate exclude=problemstate1,problemstate2,False
+
+
+means to exclude states ``problemstate1`` and ``problemstate2``
+from the highstate, and use regular output.
+
+Example output for the above highstate call when ``top.sls`` defines only
+one other state to apply to minion ``twd``:
+
+.. code-block:: text
+
+    twd:
+
+    Summary for twd
+    ------------
+    Succeeded: 1 (changed=1)
+    Failed:    0
+    ------------
+    Total states run:     1
+
+
+Example output with no special settings in configuration files:
 
 .. code-block:: text
 
@@ -69,11 +106,15 @@ import textwrap
 
 # Import salt libs
 import salt.utils
-import salt.utils.locales
 import salt.output
+from salt.utils.locales import sdecode
 
 # Import 3rd-party libs
 import salt.ext.six as six
+
+import logging
+
+log = logging.getLogger(__name__)
 
 
 def output(data):
@@ -86,6 +127,8 @@ def output(data):
 
 
 def _format_host(host, data):
+    host = sdecode(host)
+
     colors = salt.utils.get_colors(
             __opts__.get('color'),
             __opts__.get('color_theme'))
@@ -111,7 +154,7 @@ def _format_host(host, data):
                       .format(hcolor, colors)))
         for err in data:
             if strip_colors:
-                err = salt.output.strip_esc_sequence(err)
+                err = salt.output.strip_esc_sequence(sdecode(err))
             hstrs.append((u'{0}----------\n    {1}{2[ENDC]}'
                           .format(hcolor, err, colors)))
     if isinstance(data, dict):
@@ -131,7 +174,18 @@ def _format_host(host, data):
             # Increment result counts
             rcounts.setdefault(ret['result'], 0)
             rcounts[ret['result']] += 1
-            rdurations.append(ret.get('duration', 0))
+            rduration = ret.get('duration', 0)
+            try:
+                float(rduration)
+                rdurations.append(rduration)
+            except ValueError:
+                rduration, _, _ = rduration.partition(' ms')
+                try:
+                    float(rduration)
+                    rdurations.append(rduration)
+                except ValueError:
+                    log.error('Cannot parse a float from duration {0}'
+                              .format(ret.get('duration', 0)))
 
             tcolor = colors['GREEN']
             schanged, ctext = _format_changes(ret['changes'])
@@ -156,7 +210,7 @@ def _format_host(host, data):
             if ret['result'] is None:
                 hcolor = colors['LIGHT_YELLOW']
                 tcolor = colors['LIGHT_YELLOW']
-            comps = tname.split('_|-')
+            comps = [sdecode(comp) for comp in tname.split('_|-')]
             if __opts__.get('state_output', 'full').lower() == 'filter':
                 # By default, full data is shown for all types. However, return
                 # data may be excluded by setting state_output_exclude to a
@@ -228,12 +282,12 @@ def _format_host(host, data):
             # be sure that ret['comment'] is utf-8 friendly
             try:
                 if not isinstance(ret['comment'], six.text_type):
-                    ret['comment'] = ret['comment'].decode('utf-8')
+                    ret['comment'] = str(ret['comment']).decode('utf-8')
             except UnicodeDecodeError:
                 # but try to continue on errors
                 pass
             try:
-                comment = salt.utils.locales.sdecode(ret['comment'])
+                comment = sdecode(ret['comment'])
                 comment = comment.strip().replace(
                         u'\n',
                         u'\n' + u' ' * 14)
@@ -266,7 +320,7 @@ def _format_host(host, data):
                 'tcolor': tcolor,
                 'comps': comps,
                 'ret': ret,
-                'comment': comment,
+                'comment': sdecode(comment),
                 # This nukes any trailing \n and indents the others.
                 'colors': colors
             }
@@ -369,16 +423,17 @@ def _format_host(host, data):
                                                line_max_len - 7)
         hstrs.append(colorfmt.format(colors['CYAN'], totals, colors))
 
-        sum_duration = sum(rdurations)
-        duration_unit = 'ms'
-        # convert to seconds if duration is 1000ms or more
-        if sum_duration > 999:
-            sum_duration /= 1000
-            duration_unit = 's'
-        total_duration = u'Total run time: {0} {1}'.format(
-            '{0:.3f}'.format(sum_duration).rjust(line_max_len - 5),
-            duration_unit)
-        hstrs.append(colorfmt.format(colors['CYAN'], total_duration, colors))
+        if __opts__.get('state_output_profile', False):
+            sum_duration = sum(rdurations)
+            duration_unit = 'ms'
+            # convert to seconds if duration is 1000ms or more
+            if sum_duration > 999:
+                sum_duration /= 1000
+                duration_unit = 's'
+            total_duration = u'Total run time: {0} {1}'.format(
+                '{0:.3f}'.format(sum_duration).rjust(line_max_len - 5),
+                duration_unit)
+            hstrs.append(colorfmt.format(colors['CYAN'], total_duration, colors))
 
     if strip_colors:
         host = salt.output.strip_esc_sequence(host)

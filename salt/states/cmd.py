@@ -55,6 +55,11 @@ This means that if a ``cmd`` state is watched by another state then the
 state that's watching will always be executed due to the `changed` state in
 the ``cmd`` state.
 
+.. _stateful-argument:
+
+Using the "Stateful" Argument
+-----------------------------
+
 Many state functions in this module now also accept a ``stateful`` argument.
 If ``stateful`` is specified to be true then it is assumed that the command
 or script will determine its own state and communicate it back by following
@@ -217,6 +222,7 @@ except ImportError:
     pass
 
 # Import salt libs
+import salt.utils
 from salt.exceptions import CommandExecutionError, SaltRenderError
 from salt.ext.six import string_types
 
@@ -469,7 +475,7 @@ def wait(name,
 
     stateful
         The command being executed is expected to return data about executing
-        a state
+        a state. For more information, see the :ref:`stateful-argument` section.
 
     creates
         Only run if the file specified by ``creates`` does not exist.
@@ -494,7 +500,7 @@ def wait(name,
 
 
 # Alias "cmd.watch" to "cmd.wait", as this is a common misconfiguration
-watch = wait
+watch = salt.utils.alias_function(wait, 'watch')
 
 
 def wait_script(name,
@@ -598,7 +604,7 @@ def wait_script(name,
 
     stateful
         The command being executed is expected to return data about executing
-        a state
+        a state. For more information, see the :ref:`stateful-argument` section.
 
     use_vt
         Use VT utils (saltstack) to stream the command output more
@@ -707,7 +713,7 @@ def run(name,
 
     stateful
         The command being executed is expected to return data about executing
-        a state
+        a state. For more information, see the :ref:`stateful-argument` section.
 
     umask
         The umask (in octal) to use when running the command.
@@ -781,13 +787,6 @@ def run(name,
            'result': False,
            'comment': ''}
 
-    if cwd and not os.path.isdir(cwd):
-        ret['comment'] = (
-            'Desired working directory "{0}" '
-            'is not available'
-        ).format(cwd)
-        return ret
-
     # Need the check for None here, if env is not provided then it falls back
     # to None and it is assumed that the environment is not being overridden.
     if env is not None and not isinstance(env, (list, dict)):
@@ -817,6 +816,13 @@ def run(name,
             ret['result'] = None
             ret['comment'] = 'Command "{0}" would have been executed'.format(name)
             return _reinterpreted_state(ret) if stateful else ret
+
+        if cwd and not os.path.isdir(cwd):
+            ret['comment'] = (
+                'Desired working directory "{0}" '
+                'is not available'
+            ).format(cwd)
+            return ret
 
         # Wow, we passed the test, run this sucker!
         try:
@@ -945,12 +951,15 @@ def script(name,
                 - env:
                   - PATH: {{ [current_path, '/my/special/bin']|join(':') }}
 
+    saltenv : ``base``
+        The Salt environment to use
+
     umask
          The umask (in octal) to use when running the command.
 
     stateful
         The command being executed is expected to return data about executing
-        a state
+        a state. For more information, see the :ref:`stateful-argument` section.
 
     timeout
         If the command has not terminated after timeout seconds, send the
@@ -990,13 +999,6 @@ def script(name,
            'changes': {},
            'result': False,
            'comment': ''}
-
-    if cwd and not os.path.isdir(cwd):
-        ret['comment'] = (
-            'Desired working directory "{0}" '
-            'is not available'
-        ).format(cwd)
-        return ret
 
     # Need the check for None here, if env is not provided then it falls back
     # to None and it is assumed that the environment is not being overridden.
@@ -1051,6 +1053,13 @@ def script(name,
             ret['comment'] = 'Command {0!r} would have been ' \
                              'executed'.format(name)
             return _reinterpreted_state(ret) if stateful else ret
+
+        if cwd and not os.path.isdir(cwd):
+            ret['comment'] = (
+                'Desired working directory "{0}" '
+                'is not available'
+            ).format(cwd)
+            return ret
 
         # Wow, we passed the test, run this sucker!
         try:

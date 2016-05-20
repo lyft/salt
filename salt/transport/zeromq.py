@@ -77,6 +77,7 @@ class AsyncZeroMQReqChannel(salt.transport.client.ReqChannel):
             new_obj = object.__new__(cls)
             new_obj.__singleton_init__(opts, **kwargs)
             loop_instance_map[key] = new_obj
+            log.trace('Inserted key into loop_instance_map id {0} for key {1} and process {2}'.format(id(loop_instance_map), key, os.getpid()))
         else:
             log.debug('Re-using AsyncZeroMQReqChannel for {0}'.format(key))
         try:
@@ -150,9 +151,21 @@ class AsyncZeroMQReqChannel(salt.transport.client.ReqChannel):
             # Return controle back to the caller, continue when authentication succeeds
             yield self.auth.authenticate()
         # Return control to the caller. When send() completes, resume by populating ret with the Future.result
-        ret = yield self.message_client.send(self._package_load(self.auth.crypticle.dumps(load)), timeout=timeout)
+        ret = yield self.message_client.send(
+            self._package_load(self.auth.crypticle.dumps(load)),
+            timeout=timeout,
+            tries=tries,
+        )
         key = self.auth.get_keys()
         cipher = PKCS1_OAEP.new(key)
+        if 'key' not in ret:
+            # Reauth in the case our key is deleted on the master side.
+            yield self.auth.authenticate()
+            ret = yield self.message_client.send(
+                self._package_load(self.auth.crypticle.dumps(load)),
+                timeout=timeout,
+                tries=tries,
+            )
         aes = cipher.decrypt(ret['key'])
         pcrypt = salt.crypt.Crypticle(self.opts, aes)
         raise tornado.gen.Return(pcrypt.loads(ret[dictkey]))
@@ -175,9 +188,11 @@ class AsyncZeroMQReqChannel(salt.transport.client.ReqChannel):
         @tornado.gen.coroutine
         def _do_transfer():
             # Yield control to the caller. When send() completes, resume by populating data with the Future.result
-            data = yield self.message_client.send(self._package_load(self.auth.crypticle.dumps(load)),
-                                      timeout=timeout,
-                                      )
+            data = yield self.message_client.send(
+                self._package_load(self.auth.crypticle.dumps(load)),
+                timeout=timeout,
+                tries=tries,
+            )
             # we may not have always data
             # as for example for saltcall ret submission, this is a blind
             # communication, we do not subscribe to return events, we just
@@ -206,7 +221,12 @@ class AsyncZeroMQReqChannel(salt.transport.client.ReqChannel):
         :param int tries: The number of times to make before failure
         :param int timeout: The number of seconds on a response before failing
         '''
-        ret = yield self.message_client.send(self._package_load(load), timeout=timeout)
+        ret = yield self.message_client.send(
+            self._package_load(load),
+            timeout=timeout,
+            tries=tries,
+        )
+
         raise tornado.gen.Return(ret)
 
     @tornado.gen.coroutine
@@ -253,7 +273,6 @@ class AsyncZeroMQPubChannel(salt.transport.mixins.auth.AESPubClientMixin, salt.t
         else:
             self._socket.setsockopt(zmq.SUBSCRIBE, '')
 
-        self._socket.setsockopt(zmq.SUBSCRIBE, '')
         self._socket.setsockopt(zmq.IDENTITY, self.opts['id'])
 
         # TODO: cleanup all the socket opts stuff
@@ -312,7 +331,10 @@ class AsyncZeroMQPubChannel(salt.transport.mixins.auth.AESPubClientMixin, salt.t
             # TODO: Optionally call stream.close() on newer pyzmq? Its broken on some
             self._stream.io_loop.remove_handler(self._stream.socket)
             self._stream.socket.close(0)
-        self.context.term()
+        elif hasattr(self, '_socket'):
+            self._socket.close(0)
+        if hasattr(self, 'context'):
+            self.context.term()
 
     def __del__(self):
         self.destroy()
@@ -346,6 +368,9 @@ class AsyncZeroMQPubChannel(salt.transport.mixins.auth.AESPubClientMixin, salt.t
             payload = self.serial.loads(messages[0])
         # 2 includes a header which says who should do it
         elif messages_len == 2:
+            if messages[0] not in ('broadcast', self.hexid):
+                log.debug('Publish received for not this minion: {0}'.format(messages[0]))
+                raise tornado.gen.Return(None)
             payload = self.serial.loads(messages[1])
         else:
             raise Exception(('Invalid number of messages ({0}) in zeromq pub'
@@ -366,7 +391,7 @@ class AsyncZeroMQPubChannel(salt.transport.mixins.auth.AESPubClientMixin, salt.t
 
     def on_recv(self, callback):
         '''
-        Register a callback for recieved messages (that we didn't initiate)
+        Register a callback for received messages (that we didn't initiate)
 
         :param func callback: A function which should be called when data is received
         '''
@@ -376,11 +401,17 @@ class AsyncZeroMQPubChannel(salt.transport.mixins.auth.AESPubClientMixin, salt.t
         @tornado.gen.coroutine
         def wrap_callback(messages):
             payload = yield self._decode_messages(messages)
-            callback(payload)
+            if payload is not None:
+                callback(payload)
         return self.stream.on_recv(wrap_callback)
 
 
 class ZeroMQReqServerChannel(salt.transport.mixins.auth.AESReqServerMixin, salt.transport.server.ReqServerChannel):
+
+    def __init__(self, opts):
+        salt.transport.server.ReqServerChannel.__init__(self, opts)
+        self._closing = False
+
     def zmq_device(self):
         '''
         Multiprocessing target for the zmq queue device
@@ -428,9 +459,15 @@ class ZeroMQReqServerChannel(salt.transport.mixins.auth.AESReqServerMixin, salt.
         '''
         Cleanly shutdown the router socket
         '''
+        if self._closing:
+            return
+        self._closing = True
         if hasattr(self, '_monitor') and self._monitor is not None:
             self._monitor.stop()
             self._monitor = None
+        if hasattr(self, '_w_monitor') and self._w_monitor is not None:
+            self._w_monitor.stop()
+            self._w_monitor = None
         if hasattr(self, 'clients'):
             self.clients.close()
         self.stream.close()
@@ -458,6 +495,13 @@ class ZeroMQReqServerChannel(salt.transport.mixins.auth.AESReqServerMixin, salt.
 
         self.context = zmq.Context(1)
         self._socket = self.context.socket(zmq.REP)
+        if HAS_ZMQ_MONITOR and self.opts['zmq_monitor']:
+            # Socket monitor shall be used the only for debug  purposes so using threading doesn't look too bad here
+            import threading
+            self._w_monitor = ZeroMQSocketMonitor(self._socket)
+            t = threading.Thread(target=self._w_monitor.start_poll)
+            t.start()
+
         if self.opts.get('ipc_mode', '') == 'tcp':
             self.w_uri = 'tcp://127.0.0.1:{0}'.format(
                 self.opts.get('tcp_master_workers', 4515)
@@ -487,8 +531,8 @@ class ZeroMQReqServerChannel(salt.transport.mixins.auth.AESReqServerMixin, salt.
         try:
             payload = self.serial.loads(payload[0])
             payload = self._decode_payload(payload)
-        except Exception as e:
-            log.error('Bad load from minion')
+        except Exception as exc:
+            log.error('Bad load from minion: %s: %s', type(exc).__name__, exc)
             stream.send(self.serial.dumps('bad load'))
             raise tornado.gen.Return()
 
@@ -721,6 +765,7 @@ class AsyncReqMessageClient(object):
             self.stream.io_loop.remove_handler(self.stream.socket)
             # set this to None, more hacks for messed up pyzmq
             self.stream.socket = None
+            self.stream = None
             self.socket.close()
         self.context.term()
 
@@ -781,8 +826,12 @@ class AsyncReqMessageClient(object):
     @tornado.gen.coroutine
     def _internal_send_recv(self):
         while len(self.send_queue) > 0:
-            message = self.send_queue.pop(0)
-            future = self.send_future_map[message]
+            message = self.send_queue[0]
+            future = self.send_future_map.get(message, None)
+            if future is None:
+                # Timedout
+                del self.send_queue[0]
+                continue
 
             # send
             def mark_future(msg):
@@ -795,14 +844,19 @@ class AsyncReqMessageClient(object):
                 ret = yield future
             except:  # pylint: disable=W0702
                 self._init_socket()  # re-init the zmq socket (no other way in zmq)
+                del self.send_queue[0]
                 continue
+            del self.send_queue[0]
+            self.send_future_map.pop(message, None)
             self.remove_message_timeout(message)
 
     def remove_message_timeout(self, message):
         if message not in self.send_timeout_map:
             return
-        timeout = self.send_timeout_map.pop(message)
-        self.io_loop.remove_timeout(timeout)
+        timeout = self.send_timeout_map.pop(message, None)
+        if timeout is not None:
+            # Hasn't been already timedout
+            self.io_loop.remove_timeout(timeout)
 
     def timeout_message(self, message):
         '''
@@ -811,15 +865,32 @@ class AsyncReqMessageClient(object):
 
         :raises: SaltReqTimeoutError
         '''
+        future = self.send_future_map.pop(message)
         del self.send_timeout_map[message]
-        self.send_future_map.pop(message).set_exception(SaltReqTimeoutError('Message timed out'))
+        if future.attempts < future.tries:
+            future.attempts += 1
+            log.debug('SaltReqTimeoutError, retrying. ({0}/{1})'.format(future.attempts, future.tries))
+            self.send(
+                message,
+                timeout=future.timeout,
+                tries=future.tries,
+                future=future,
+            )
 
-    def send(self, message, timeout=None, callback=None):
+        else:
+            future.set_exception(SaltReqTimeoutError('Message timed out'))
+
+    def send(self, message, timeout=None, tries=3, future=None, callback=None):
         '''
         Return a future which will be completed when the message has a response
         '''
-        message = self.serial.dumps(message)
-        future = tornado.concurrent.Future()
+        if future is None:
+            future = tornado.concurrent.Future()
+            future.tries = tries
+            future.attempts = 0
+            future.timeout = timeout
+            # if a future wasn't passed in, we need to serialize the message
+            message = self.serial.dumps(message)
         if callback is not None:
             def handle_future(future):
                 response = future.result()

@@ -9,10 +9,13 @@ Module for managing Windows Updates using the Windows Update Agent.
         - pythoncom
 """
 from __future__ import absolute_import
-from salt.ext.six.moves import range  # pylint: disable=no-name-in-module,redefined-builtin
 
 # Import Python libs
 import logging
+
+# Import Salt libs
+from salt.ext import six
+from salt.ext.six.moves import range  # pylint: disable=no-name-in-module,redefined-builtin
 
 # Import 3rd-party libs
 try:
@@ -312,18 +315,18 @@ def list_update(name=None,
 
         # Recommended Usage using GUID without braces
         # Use this to find the status of a specific update
-        salt '*' wua.list_update 12345678-abcd-1234-abcd-1234567890ab
+        salt '*' win_wua.list_update 12345678-abcd-1234-abcd-1234567890ab
 
         # Use the following if you don't know the GUID:
 
         # Using a KB number (could possibly return multiple results)
         # Not all updates have an associated KB
-        salt '*' wua.list_update KB3030298
+        salt '*' win_wua.list_update KB3030298
 
         # Using part or all of the name of the update
         # Could possibly return multiple results
         # Not all updates have an associated KB
-        salt '*' wua.list_update 'Microsoft Camera Codec Pack'
+        salt '*' win_wua.list_update 'Microsoft Camera Codec Pack'
 
     """
     if name is None:
@@ -489,22 +492,22 @@ def list_updates(software=True,
     .. code-block:: bash
 
         # Normal Usage (list all software updates)
-        salt '*' wua.list_updates
+        salt '*' win_wua.list_updates
 
         # List all updates with categories of Critical Updates and Drivers
-        salt '*' wua.list_updates categories=['Critical Updates','Drivers']
+        salt '*' win_wua.list_updates categories=['Critical Updates','Drivers']
 
         # List all Critical Security Updates
-        salt '*' wua.list_updates categories=['Security Updates'] severities=['Critical']
+        salt '*' win_wua.list_updates categories=['Security Updates'] severities=['Critical']
 
         # List all updates with a severity of Critical
-        salt '*' wua.list_updates severities=['Critical']
+        salt '*' win_wua.list_updates severities=['Critical']
 
         # A summary of all available updates
-        salt '*' wua.list_updates summary=True
+        salt '*' win_wua.list_updates summary=True
 
         # A summary of all Feature Packs and Windows 8.1 Updates
-        salt '*' wua.list_updates categories=['Feature Packs','Windows 8.1'] summary=True
+        salt '*' win_wua.list_updates categories=['Feature Packs','Windows 8.1'] summary=True
 
     """
     # Get the list of updates
@@ -1060,9 +1063,15 @@ def set_wu_settings(level=None,
                 ret['Success'] = False
 
     if time is not None:
+        # Check for time as a string: if the time is not quoted, yaml will
+        # treat it as an integer
+        if not isinstance(time, six.string_types):
+            ret['Comment'] = "Time argument needs to be a string; it may need to"\
+                             "be quoted. Passed {0}. Time not set.".format(time)
+            ret['Success'] = False
         # Check for colon in the time
-        if ':' not in time:
-            ret['Comment'] = "Time needs to be in 00:00 format." \
+        elif ':' not in time:
+            ret['Comment'] = "Time argument needs to be in 00:00 format." \
                              " Passed {0}. Time not set.".format(time)
             ret['Success'] = False
         else:

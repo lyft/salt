@@ -418,17 +418,24 @@ def install(pkgs=None,  # pylint: disable=R0912,R0913,R0914
     process_dependency_links
         Enable the processing of dependency links
 
-    use_vt
-        Use VT terminal emulation (see ouptut while installing)
-
     env_vars
         Set environment variables that some builds will depend on. For example,
         a Python C-module may have a Makefile that needs INCLUDE_PATH set to
-        pick up a header file while compiling.
+        pick up a header file while compiling.  This must be in the form of a
+        dictionary or a mapping.
+
+        Example:
+
+        .. code-block:: bash
+
+            salt '*' pip.install django_app env_vars="{'CUSTOM_PATH': '/opt/django_app'}"
+
     trusted_host
         Mark this host as trusted, even though it does not have valid or any
         HTTPS.
 
+    use_vt
+        Use VT terminal emulation (see output while installing)
 
     CLI Example:
 
@@ -639,7 +646,7 @@ def install(pkgs=None,  # pylint: disable=R0912,R0913,R0914
             cmd.append('--pre')
 
     if cert:
-        cmd.append(['--cert', cert])
+        cmd.extend(['--cert', cert])
 
     if global_options:
         if isinstance(global_options, string_types):
@@ -690,7 +697,7 @@ def install(pkgs=None,  # pylint: disable=R0912,R0913,R0914
             allow_external = [p.strip() for p in allow_external.split(',')]
 
         for pkg in allow_external:
-            cmd.append('--allow-external {0}'.format(pkg))
+            cmd.extend(['--allow-external', pkg])
 
     if allow_unverified:
         if isinstance(allow_unverified, string_types):
@@ -698,16 +705,19 @@ def install(pkgs=None,  # pylint: disable=R0912,R0913,R0914
                 [p.strip() for p in allow_unverified.split(',')]
 
         for pkg in allow_unverified:
-            cmd.append('--allow-unverified {0}'.format(pkg))
+            cmd.extend(['--allow-unverified', pkg])
 
     if process_dependency_links:
         cmd.append('--process-dependency-links')
 
     if env_vars:
-        os.environ.update(env_vars)
+        if isinstance(env_vars, dict):
+            os.environ.update(env_vars)
+        else:
+            raise CommandExecutionError('env_vars {0} is not a dictionary'.format(env_vars))
 
     if trusted_host:
-        cmd.append('--trusted-host {0}'.format(trusted_host))
+        cmd.extend(['--trusted-host', trusted_host])
 
     try:
         cmd_kwargs = dict(cwd=cwd, saltenv=saltenv, use_vt=use_vt, runas=user)
@@ -773,7 +783,7 @@ def uninstall(pkgs=None,
     cwd
         Current working directory to run pip from
     use_vt
-        Use VT terminal emulation (see ouptut while installing)
+        Use VT terminal emulation (see output while installing)
 
     CLI Example:
 

@@ -4,46 +4,16 @@
 Requisites and Other Global State Arguments
 ===========================================
 
-.. _requisites-fire-event:
-
-Fire Event Notifications
-========================
-
-.. versionadded:: 2015.8.0
-
-The `fire_event` option in a state will cause the minion to send an event to
-the Salt Master upon completion of that individual state.
-
-The following example will cause the minion to send an event to the Salt Master
-with a tag of `salt/state_result/20150505121517276431/dasalt/nano` and the
-result of the state will be the data field of the event. Notice that the `name`
-of the state gets added to the tag.
-
-.. code-block:: yaml
-
-    nano_stuff:
-      pkg.installed:
-        - name: nano
-        - fire_event: True
-
-In the following example instead of setting `fire_event` to `True`,
-`fire_event` is set to an arbitrary string, which will cause the event to be
-sent with this tag:
-`salt/state_result/20150505121725642845/dasalt/custom/tag/nano/finished`
-
-.. code-block:: yaml
-
-    nano_stuff:
-      pkg.installed:
-        - name: nano
-        - fire_event: custom/tag/nano/finished
-
 Requisites
 ==========
 
 The Salt requisite system is used to create relationships between states. The
 core idea being that, when one state is dependent somehow on another, that
-inter-dependency can be easily defined.
+inter-dependency can be easily defined. These dependencies are expressed by
+declaring the relationships using state names and ID's or names.  The
+generalized form of a requisite target is ``<state name> : <ID or name>``.
+The specific form is defined as a :ref:`Requisite Reference
+<requisite-reference>`
 
 Requisites come in two types: Direct requisites (such as ``require``),
 and requisite_ins (such as ``require_in``). The relationships are
@@ -445,6 +415,40 @@ Now the httpd server will only start if php or mod_python are first verified to
 be installed. Thus allowing for a requisite to be defined "after the fact".
 
 
+.. _requisites-fire-event:
+
+Fire Event Notifications
+========================
+
+.. versionadded:: 2015.8.0
+
+The `fire_event` option in a state will cause the minion to send an event to
+the Salt Master upon completion of that individual state.
+
+The following example will cause the minion to send an event to the Salt Master
+with a tag of `salt/state_result/20150505121517276431/dasalt/nano` and the
+result of the state will be the data field of the event. Notice that the `name`
+of the state gets added to the tag.
+
+.. code-block:: yaml
+
+    nano_stuff:
+      pkg.installed:
+        - name: nano
+        - fire_event: True
+
+In the following example instead of setting `fire_event` to `True`,
+`fire_event` is set to an arbitrary string, which will cause the event to be
+sent with this tag:
+`salt/state_result/20150505121725642845/dasalt/custom/tag/nano/finished`
+
+.. code-block:: yaml
+
+    nano_stuff:
+      pkg.installed:
+        - name: nano
+        - fire_event: custom/tag/nano/finished
+
 Altering States
 ===============
 
@@ -455,6 +459,12 @@ under certain conditions. The use of unless or onlyif options help make states
 even more stateful. The check_cmds option helps ensure that the result of a
 state is evaluated correctly.
 
+Reload
+------
+
+``reload_modules`` is a boolean option that forces salt to reload its modules
+after a state finishes. See :ref:`Reloading Modules <reloading-modules>`.
+
 Unless
 ------
 
@@ -462,13 +472,15 @@ Unless
 
 The ``unless`` requisite specifies that a state should only run when any of
 the specified commands return ``False``. The ``unless`` requisite operates
-as NOR and is useful in giving more granular control over when a state should
+as NAND and is useful in giving more granular control over when a state should
 execute.
 
 **NOTE**: Under the hood ``unless`` calls ``cmd.retcode`` with
-``python_shell=True``. This means the commands referenced by unless will be
+``python_shell=True``. This means the commands referenced by ``unless`` will be
 parsed by a shell, so beware of side-effects as this shell will be run with the
-same privileges as the salt-minion.
+same privileges as the salt-minion. Also be aware that the boolean value is
+determined by the shell's concept of ``True`` and ``False``, rather than Python's
+concept of ``True`` and ``False``.
 
 .. code-block:: yaml
 
@@ -506,14 +518,16 @@ Onlyif
 
 .. versionadded:: 2014.7.0
 
-``onlyif`` is the opposite of ``unless``. If all of the commands in ``onlyif``
-return ``True``, then the state is run. If any of the specified commands
+The ``onlyif`` requisite specifies that if each command listed in ``onlyif``
+returns ``True``, then the state is run. If any of the specified commands
 return ``False``, the state will not run.
 
 **NOTE**: Under the hood ``onlyif`` calls ``cmd.retcode`` with
-``python_shell=True``. This means the commands referenced by unless will be
+``python_shell=True``. This means the commands referenced by ``onlyif`` will be
 parsed by a shell, so beware of side-effects as this shell will be run with the
-same privileges as the salt-minion.
+same privileges as the salt-minion. Also be aware that the boolean value is
+determined by the shell's concept of ``True`` and ``False``, rather than Python's
+concept of ``True`` and ``False``.
 
 .. code-block:: yaml
 

@@ -26,12 +26,13 @@ class Batch(object):
     '''
     Manage the execution of batch runs
     '''
-    def __init__(self, opts, eauth=None, quiet=False):
+    def __init__(self, opts, eauth=None, quiet=False, parser=None):
         self.opts = opts
         self.eauth = eauth if eauth else {}
         self.quiet = quiet
         self.local = salt.client.get_local_client(opts['conf_file'])
         self.minions, self.ping_gen = self.__gather_minions()
+        self.options = parser
 
     def __gather_minions(self):
         '''
@@ -96,6 +97,13 @@ class Batch(object):
         ret = {}
         iters = []
 
+        if self.options:
+            show_jid = self.options.show_jid
+            show_verbose = self.options.verbose
+        else:
+            show_jid = False
+            show_verbose = False
+
         # the minion tracker keeps track of responses and iterators
         # - it removes finished iterators from iters[]
         # - if a previously detected minion does not respond, its
@@ -131,6 +139,8 @@ class Batch(object):
                                 *args,
                                 raw=self.opts.get('raw', False),
                                 ret=self.opts.get('return', ''),
+                                show_jid=show_jid,
+                                verbose=show_verbose,
                                 **self.eauth)
                 # add it to our iterators and to the minion_tracker
                 iters.append(new_iter)
@@ -170,7 +180,8 @@ class Batch(object):
                         else:
                             parts.update(part)
                             for id in part.keys():
-                                minion_tracker[queue]['minions'].remove(id)
+                                if id in minion_tracker[queue]['minions']:
+                                    minion_tracker[queue]['minions'].remove(id)
                 except StopIteration:
                     # if a iterator is done:
                     # - set it to inactive
@@ -192,6 +203,11 @@ class Batch(object):
                     active.remove(minion)
                 if self.opts.get('raw'):
                     yield data
+                elif self.opts.get('failhard'):
+                    # When failhard is passed, we need to return all data to include
+                    # the retcode to use in salt/cli/salt.py later. See issue #24996.
+                    ret[minion] = data
+                    yield {minion: data}
                 else:
                     ret[minion] = data['ret']
                     yield {minion: data['ret']}

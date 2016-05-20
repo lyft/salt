@@ -67,7 +67,7 @@ def __virtual__():
     '''
     if not HAS_BOTO:
         return False
-    __utils__['boto.assign_funcs'](__name__, 'iam')
+    __utils__['boto.assign_funcs'](__name__, 'iam', pack=__salt__)
     return True
 
 
@@ -360,7 +360,7 @@ def create_group(group_name, path=None, region=None, key=None, keyid=None,
     '''
     if not path:
         path = '/'
-    if get_group(group_name, region, key, keyid, profile):
+    if get_group(group_name, region=region, key=key, keyid=keyid, profile=profile):
         return True
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     try:
@@ -418,8 +418,8 @@ def add_user_to_group(user_name, group_name, region=None, key=None, keyid=None,
         msg = 'Username : {0} does not exist.'
         log.error(msg.format(user_name, group_name))
         return False
-    if user_exists_in_group(user_name, group_name, region=None, key=None, keyid=None,
-                            profile=None):
+    if user_exists_in_group(user_name, group_name, region=region, key=key, keyid=keyid,
+                            profile=profile):
         return True
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     try:
@@ -447,7 +447,7 @@ def user_exists_in_group(user_name, group_name, region=None, key=None, keyid=Non
 
         salt myminion boto_iam.user_exists_in_group myuser mygroup
     '''
-    group = get_group(group_name=group_name, region=region, key=key, keyid=keyid,
+    group = get_group(group_name, region=region, key=key, keyid=keyid,
                       profile=profile)
     if group:
         for _users in group['get_group_response']['get_group_result']['users']:
@@ -476,8 +476,8 @@ def remove_user_from_group(group_name, user_name, region=None, key=None, keyid=N
         msg = 'Username : {0} does not exist.'
         log.error(msg.format(user_name, group_name))
         return False
-    if not user_exists_in_group(user_name, group_name, region=None, key=None, keyid=None,
-                                profile=None):
+    if not user_exists_in_group(user_name, group_name, region=region, key=key,
+                                keyid=keyid, profile=profile):
         return True
     conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     try:
@@ -505,11 +505,11 @@ def put_group_policy(group_name, policy_name, policy_json, region=None, key=None
 
         salt myminion boto_iam.put_group_policy mygroup policyname policyrules
     '''
-    group = get_group(group_name, region, key, keyid, profile)
+    group = get_group(group_name, region=region, key=key, keyid=keyid, profile=profile)
     if not group:
         log.error('Group {0} does not exist'.format(group_name))
         return False
-    conn = _get_conn(region, key, keyid, profile)
+    conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     try:
         if not isinstance(policy_json, string_types):
             policy_json = json.dumps(policy_json)
@@ -538,7 +538,7 @@ def delete_group_policy(group_name, policy_name, region=None, key=None,
 
         salt myminion boto_iam.delete_group_policy mygroup mypolicy
     '''
-    conn = _get_conn(region, key, keyid, profile)
+    conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     if not conn:
         return False
     _policy = get_group_policy(
@@ -599,7 +599,7 @@ def get_all_group_policies(group_name, region=None, key=None, keyid=None,
 
         salt myminion boto_iam.get_all_group_policies mygroup
     '''
-    conn = _get_conn(region, key, keyid, profile)
+    conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     if not conn:
         return False
     try:
@@ -1144,7 +1144,7 @@ def put_user_policy(user_name, policy_name, policy_json, region=None, key=None, 
     if not user:
         log.error('User {0} does not exist'.format(user_name))
         return False
-    conn = _get_conn(region, key, keyid, profile)
+    conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     try:
         if not isinstance(policy_json, string_types):
             policy_json = json.dumps(policy_json)
@@ -1172,7 +1172,7 @@ def delete_user_policy(user_name, policy_name, region=None, key=None, keyid=None
 
         salt myminion boto_iam.delete_user_policy myuser mypolicy
     '''
-    conn = _get_conn(region, key, keyid, profile)
+    conn = _get_conn(region=region, key=key, keyid=keyid, profile=profile)
     if not conn:
         return False
     _policy = get_user_policy(

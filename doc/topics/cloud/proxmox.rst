@@ -3,7 +3,7 @@ Getting Started With Proxmox
 ============================
 
 Proxmox Virtual Environment is a complete server virtualization management solution,
-based on KVM virtualization and OpenVZ containers.
+based on LXC and full virtualization with KVM.
 Further information can be found at:
 
 http://www.proxmox.org/
@@ -67,6 +67,9 @@ Set up an initial profile at ``/etc/salt/cloud.profiles`` or
         provider: my-proxmox-config
         image: local:vztmpl/ubuntu-12.04-standard_12.04-1_amd64.tar.gz
         technology: openvz
+
+        # host needs to be set to the configured name of the proxmox host
+        # and not the ip address or FQDN of the server
         host: myvmhost
         ip_address: 192.168.100.155
         password: topsecret

@@ -78,7 +78,7 @@ def __virtual__():
     if not HAS_BOTO:
         return False
 
-    __utils__['boto.assign_funcs'](__name__, 'asg', module='ec2.autoscale')
+    __utils__['boto.assign_funcs'](__name__, 'asg', module='ec2.autoscale', pack=__salt__)
     setattr(sys.modules[__name__], '_get_ec2_conn',
             __utils__['boto.get_connection_func']('ec2'))
     return True
@@ -552,4 +552,5 @@ def get_instances(name, lifecycle_state="InService", health_status="Healthy", at
         instance_ids.append(i.instance_id)
     # get full instance info, so that we can return the attribute
     instances = ec2_conn.get_only_instances(instance_ids=instance_ids)
-    return [getattr(instance, attribute).encode("ascii") for instance in instances]
+    attributes = [getattr(instance, attribute) for instance in instances]
+    return [attribute.encode("ascii") if attribute is not None else None for attribute in attributes]

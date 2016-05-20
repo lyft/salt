@@ -110,7 +110,7 @@ class OptionParser(optparse.OptionParser, object):
     usage = '%prog'
 
     epilog = ('You can find additional help about %prog issuing "man %prog" '
-              'or on http://docs.saltstack.org')
+              'or on http://docs.saltstack.com')
     description = None
 
     # Private attributes
@@ -1076,10 +1076,17 @@ class OutputOptionsMixIn(six.with_metaclass(MixInMeta, object)):
         )
         group.add_option(
             '--state-output', '--state_output',
-            default='full',
+            default=None,
             help=('Override the configured state_output value for minion '
                   'output. One of full, terse, mixed, changes or filter. '
                   'Default: full.')
+        )
+        group.add_option(
+            '--state-verbose', '--state_verbose',
+            default=None,
+            help=('Override the configured state_verbose value for minion '
+                  'output. Set to True or False'
+                  'Default: True')
         )
 
         for option in self.output_options_group.option_list:
@@ -1111,6 +1118,12 @@ class OutputOptionsMixIn(six.with_metaclass(MixInMeta, object)):
                             exc
                         )
                     )
+
+    def process_state_verbose(self):
+        if self.options.state_verbose == "True" or self.options.state_verbose == "true":
+            self.options.state_verbose = True
+        elif self.options.state_verbose == "False" or self.options.state_verbose == "false":
+            self.options.state_verbose = False
 
     def _mixin_after_parsed(self):
         group_options_selected = [
@@ -1168,7 +1181,7 @@ class ExecutionOptionsMixIn(six.with_metaclass(MixInMeta, object)):
             '-m', '--map',
             default=None,
             help='Specify a cloud map file to use for deployment. This option '
-                 'may be used alone, or in conjunction with -Q, -F, -S or -d.'
+                 'may be used alone, or in conjunction with -Q, -F, -S or -d. '
                  'The map can also be filtered by a list of VM names.'
         )
         group.add_option(
@@ -1202,8 +1215,7 @@ class ExecutionOptionsMixIn(six.with_metaclass(MixInMeta, object)):
             '-u', '--update-bootstrap',
             default=False,
             action='store_true',
-            help='Update salt-bootstrap to the latest develop version on '
-                 'GitHub.'
+            help='Update salt-bootstrap to the latest stable bootstrap release.'
         )
         group.add_option(
             '-y', '--assume-yes',
@@ -2644,7 +2656,8 @@ class SPMParser(six.with_metaclass(OptionParserMeta,
                                    OptionParser,
                                    ConfigDirMixIn,
                                    LogLevelMixIn,
-                                   MergeConfigMixIn)):
+                                   MergeConfigMixIn,
+                                   SaltfileMixIn)):
     '''
     The cli parser object used to fire up the salt spm system.
     '''

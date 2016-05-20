@@ -520,11 +520,7 @@ def which(exe=None):
             # executable in cwd or fullpath
             return exe
 
-        # default path based on busybox's default
-        default_path = '/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin'
-        search_path = os.environ.get('PATH', default_path)
-        path_ext = os.environ.get('PATHEXT', '.EXE')
-        ext_list = path_ext.split(';')
+        ext_list = os.environ.get('PATHEXT', '.EXE').split(';')
 
         @real_memoize
         def _exe_has_ext():
@@ -541,7 +537,13 @@ def which(exe=None):
                     continue
             return False
 
-        search_path = search_path.split(os.pathsep)
+        # Enhance POSIX path for the reliability at some environments, when $PATH is changing
+        # This also keeps order, where 'first came, first win' for cases to find optional alternatives
+        search_path = os.environ.get('PATH') and os.environ['PATH'].split(os.pathsep) or list()
+        for default_path in ['/bin', '/sbin', '/usr/bin', '/usr/sbin', '/usr/local/bin']:
+            if default_path not in search_path:
+                search_path.append(default_path)
+        os.environ['PATH'] = os.pathsep.join(search_path)
         for path in search_path:
             full_path = os.path.join(path, exe)
             if _is_executable_file_or_link(full_path):
@@ -554,16 +556,10 @@ def which(exe=None):
                     # safely rely on that behavior
                     if _is_executable_file_or_link(full_path + ext):
                         return full_path + ext
-        log.trace(
-            '{0!r} could not be found in the following search '
-            'path: {1!r}'.format(
-                exe, search_path
-            )
-        )
+        log.trace('{0!r} could not be found in the following search path: {1!r}'.format(exe, search_path))
     else:
-        log.error(
-            'No executable was passed to be searched by salt.utils.which()'
-        )
+        log.error('No executable was passed to be searched by salt.utils.which()')
+
     return None
 
 
@@ -862,10 +858,10 @@ def path_join(*parts):
     ))
 
 
-def pem_finger(path=None, key=None, sum_type='md5'):
+def pem_finger(path=None, key=None, sum_type='sha256'):
     '''
     Pass in either a raw pem string, or the path on disk to the location of a
-    pem file, and the type of cryptographic hash to use. The default is md5.
+    pem file, and the type of cryptographic hash to use. The default is SHA256.
     The fingerprint of the pem will be returned.
 
     If neither a key nor a path are passed in, a blank string will be returned.
@@ -1305,6 +1301,8 @@ def check_whitelist_blacklist(value, whitelist=None, blacklist=None):
     in_whitelist = False
     in_blacklist = False
     if whitelist:
+        if not isinstance(whitelist, list):
+            whitelist = [whitelist]
         try:
             for expr in whitelist:
                 if expr_match(value, expr):
@@ -1317,6 +1315,8 @@ def check_whitelist_blacklist(value, whitelist=None, blacklist=None):
         whitelist = None
 
     if blacklist:
+        if not isinstance(blacklist, list):
+            blacklist = [blacklist]
         try:
             for expr in blacklist:
                 if expr_match(value, expr):
@@ -1365,7 +1365,8 @@ def subdict_match(data,
             return fnmatch.fnmatch(str(target).lower(), pattern.lower())
 
     def _dict_match(target, pattern, regex_match=False, exact_match=False):
-        if pattern.startswith('*:'):
+        wildcard = pattern.startswith('*:')
+        if wildcard:
             pattern = pattern[2:]
 
         if pattern == '*':
@@ -1379,25 +1380,26 @@ def subdict_match(data,
                          regex_match=regex_match,
                          exact_match=exact_match):
             return True
-        for key in target.keys():
-            if _match(key,
-                      pattern,
-                      regex_match=regex_match,
-                      exact_match=exact_match):
-                return True
-            if isinstance(target[key], dict):
-                if _dict_match(target[key],
-                               pattern,
-                               regex_match=regex_match,
-                               exact_match=exact_match):
+        if wildcard:
+            for key in target.keys():
+                if _match(key,
+                          pattern,
+                          regex_match=regex_match,
+                          exact_match=exact_match):
                     return True
-            elif isinstance(target[key], list):
-                for item in target[key]:
-                    if _match(item,
-                              pattern,
-                              regex_match=regex_match,
-                              exact_match=exact_match):
+                if isinstance(target[key], dict):
+                    if _dict_match(target[key],
+                                   pattern,
+                                   regex_match=regex_match,
+                                   exact_match=exact_match):
                         return True
+                elif isinstance(target[key], list):
+                    for item in target[key]:
+                        if _match(item,
+                                  pattern,
+                                  regex_match=regex_match,
+                                  exact_match=exact_match):
+                            return True
         return False
 
     for idx in range(1, expr.count(delimiter) + 1):
@@ -1738,7 +1740,7 @@ def gen_state_tag(low):
     return '{0[state]}_|-{0[__id__]}_|-{0[name]}_|-{0[fun]}'.format(low)
 
 
-def check_state_result(running):
+def check_state_result(running, recurse=False):
     '''
     Check the total return value of the run and determine if the running
     dict has any issues
@@ -1751,20 +1753,15 @@ def check_state_result(running):
 
     ret = True
     for state_result in six.itervalues(running):
-        if not isinstance(state_result, dict):
-            # return false when hosts return a list instead of a dict
+        if not recurse and not isinstance(state_result, dict):
             ret = False
-        if ret:
+        if ret and isinstance(state_result, dict):
             result = state_result.get('result', _empty)
             if result is False:
                 ret = False
             # only override return value if we are not already failed
-            elif (
-                result is _empty
-                and isinstance(state_result, dict)
-                and ret
-            ):
-                ret = check_state_result(state_result)
+            elif result is _empty and isinstance(state_result, dict) and ret:
+                ret = check_state_result(state_result, recurse=True)
         # return as soon as we got a failure
         if not ret:
             break
@@ -1848,7 +1845,7 @@ def rm_rf(path):
             os.chmod(path, stat.S_IWUSR)
             func(path)
         else:
-            raise
+            raise  # pylint: disable=E0704
 
     shutil.rmtree(path, onerror=_onerror)
 
@@ -1977,7 +1974,7 @@ def safe_walk(top, topdown=True, onerror=None, followlinks=True, _seen=None):
         yield top, dirs, nondirs
 
 
-def get_hash(path, form='md5', chunk_size=65536):
+def get_hash(path, form='sha256', chunk_size=65536):
     '''
     Get the hash sum of a file
 
@@ -1987,10 +1984,10 @@ def get_hash(path, form='md5', chunk_size=65536):
             ``get_sum`` cannot really be trusted since it is vulnerable to
             collisions: ``get_sum(..., 'xyz') == 'Hash xyz not supported'``
     '''
-    try:
-        hash_type = getattr(hashlib, form)
-    except (AttributeError, TypeError):
+    hash_type = hasattr(hashlib, form) and getattr(hashlib, form) or None
+    if hash_type is None:
         raise ValueError('Invalid hash type: {0}'.format(form))
+
     with salt.utils.fopen(path, 'rb') as ifile:
         hash_obj = hash_type()
         # read the file in in chunks, not the entire file
@@ -2001,7 +1998,7 @@ def get_hash(path, form='md5', chunk_size=65536):
 
 def namespaced_function(function, global_dict, defaults=None):
     '''
-    Redefine(clone) a function under a different globals() namespace scope
+    Redefine (clone) a function under a different globals() namespace scope
     '''
     if defaults is None:
         defaults = function.__defaults__
@@ -2014,6 +2011,32 @@ def namespaced_function(function, global_dict, defaults=None):
     )
     new_namespaced_function.__dict__.update(function.__dict__)
     return new_namespaced_function
+
+
+def alias_function(fun, name, doc=None):
+    '''
+    Copy a function
+    '''
+    alias_fun = types.FunctionType(fun.__code__,
+                                   fun.__globals__,
+                                   name,
+                                   fun.__defaults__,
+                                   fun.__closure__)
+    alias_fun.__dict__.update(fun.__dict__)
+
+    if doc and isinstance(doc, six.string_types):
+        alias_fun.__doc__ = doc
+    else:
+        if six.PY3:
+            orig_name = fun.__name__
+        else:
+            orig_name = fun.func_name
+
+        alias_msg = ('\nThis function is an alias of '
+                     '``{0}``.\n'.format(orig_name))
+        alias_fun.__doc__ = alias_msg + fun.__doc__
+
+    return alias_fun
 
 
 def _win_console_event_handler(event):
@@ -2786,7 +2809,7 @@ def to_str(s, encoding=None):
     else:
         if isinstance(s, bytearray):
             return str(s)
-        if isinstance(s, unicode):  # pylint: disable=incompatible-py3-code
+        if isinstance(s, unicode):
             return s.encode(encoding or __salt_system_encoding__)
         raise TypeError('expected str, bytearray, or unicode')
 
@@ -2817,7 +2840,7 @@ def to_unicode(s, encoding=None):
     else:
         if isinstance(s, str):
             return s.decode(encoding or __salt_system_encoding__)
-        return unicode(s)  # pylint: disable=incompatible-py3-code
+        return unicode(s)
 
 
 def is_list(value):
@@ -2846,3 +2869,50 @@ def invalid_kwargs(invalid_kwargs, raise_exc=True):
         raise SaltInvocationError(msg)
     else:
         return msg
+
+
+def split_input(val):
+    '''
+    Take an input value and split it into a list, returning the resulting list
+    '''
+    if isinstance(val, list):
+        return val
+    try:
+        return [x.strip() for x in val.split(',')]
+    except AttributeError:
+        return [x.strip() for x in str(val).split(',')]
+
+
+def str_version_to_evr(verstring):
+    '''
+    Split the package version string into epoch, version and release.
+    Return this as tuple.
+
+    The epoch is always not empty. The version and the release can be an empty
+    string if such a component could not be found in the version string.
+
+    "2:1.0-1.2" => ('2', '1.0', '1.2)
+    "1.0" => ('0', '1.0', '')
+    "" => ('0', '', '')
+    '''
+    if verstring in [None, '']:
+        return '0', '', ''
+
+    idx_e = verstring.find(':')
+    if idx_e != -1:
+        try:
+            epoch = str(int(verstring[:idx_e]))
+        except ValueError:
+            # look, garbage in the epoch field, how fun, kill it
+            epoch = '0'  # this is our fallback, deal
+    else:
+        epoch = '0'
+    idx_r = verstring.find('-')
+    if idx_r != -1:
+        version = verstring[idx_e + 1:idx_r]
+        release = verstring[idx_r + 1:]
+    else:
+        version = verstring[idx_e + 1:]
+        release = ''
+
+    return epoch, version, release

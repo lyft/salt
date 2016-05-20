@@ -100,11 +100,15 @@ def get_minion_data(minion, opts):
     return minion if minion else None, None, None
 
 
-def nodegroup_comp(nodegroup, nodegroups, skip=None):
+def nodegroup_comp(nodegroup, nodegroups, skip=None, first_call=True):
     '''
     Recursively expand ``nodegroup`` from ``nodegroups``; ignore nodegroups in ``skip``
-    '''
 
+    If a top-level (non-recursive) call finds no nodegroups, return the original
+    nodegroup definition (for backwards compatibility). Keep track of recursive
+    calls via `first_call` argument
+    '''
+    expanded_nodegroup = False
     if skip is None:
         skip = set()
     elif nodegroup in skip:
@@ -134,7 +138,8 @@ def nodegroup_comp(nodegroup, nodegroups, skip=None):
         if word in opers:
             ret.append(word)
         elif len(word) >= 3 and word.startswith('N@'):
-            ret.extend(nodegroup_comp(word[2:], nodegroups, skip=skip))
+            expanded_nodegroup = True
+            ret.extend(nodegroup_comp(word[2:], nodegroups, skip=skip, first_call=False))
         else:
             ret.append(word)
 
@@ -145,7 +150,15 @@ def nodegroup_comp(nodegroup, nodegroups, skip=None):
     skip.remove(nodegroup)
 
     log.debug('nodegroup_comp({0}) => {1}'.format(nodegroup, ret))
-    return ret
+    # Only return list form if a nodegroup was expanded. Otherwise return
+    # the original string to conserve backwards compat
+    if expanded_nodegroup or not first_call:
+        return ret
+    else:
+        log.debug('No nested nodegroups detected. '
+                  'Using original nodegroup definition: {0}'
+                  .format(nodegroups[nodegroup]))
+        return nodegroups[nodegroup]
 
 
 class CkMinions(object):
@@ -309,12 +322,26 @@ class CkMinions(object):
         elif cache_enabled:
             minions = os.listdir(os.path.join(self.opts['cachedir'], 'minions'))
         else:
-            return list()
+            return []
 
         if cache_enabled:
             cdir = os.path.join(self.opts['cachedir'], 'minions')
             if not os.path.isdir(cdir):
                 return list(minions)
+
+            tgt = expr
+            try:
+                # Target is an address?
+                tgt = ipaddress.ip_address(tgt)
+            except:  # pylint: disable=bare-except
+                try:
+                    # Target is a network?
+                    tgt = ipaddress.ip_network(tgt)
+                except:  # pylint: disable=bare-except
+                    log.error('Invalid IP/CIDR target: {0}'.format(tgt))
+                    return []
+            proto = 'ipv{0}'.format(tgt.version)
+
             for id_ in os.listdir(cdir):
                 if not greedy and id_ not in minions:
                     continue
@@ -329,26 +356,12 @@ class CkMinions(object):
                 except (IOError, OSError):
                     continue
 
-                match = True
-                tgt = expr
-                try:
-                    tgt = ipaddress.ip_network(tgt)
-                    # Target is a network
-                    proto = 'ipv{0}'.format(tgt.version)
-                    if proto not in self.opts['grains']:
-                        match = False
-                    else:
-                        match = salt.utils.network.in_subnet(tgt, self.opts['grains'][proto])
-                except:  # pylint: disable=bare-except
-                    try:
-                       # Target should be an address
-                        proto = 'ipv{0}'.format(ipaddress.ip_address(tgt).version)
-                        if proto not in self.opts['grains']:
-                            match = False
-                        else:
-                            match = tgt in self.opts['grains'][proto]
-                    except:  # pylint: disable=bare-except
-                        log.error('Invalid IP/CIDR target {0}"'.format(tgt))
+                if proto not in grains:
+                    match = False
+                elif isinstance(tgt, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+                    match = str(tgt) in grains[proto]
+                else:
+                    match = salt.utils.network.in_subnet(tgt, grains[proto])
 
                 if not match and id_ in minions:
                     minions.remove(id_)
@@ -540,7 +553,7 @@ class CkMinions(object):
 
         return list(minions)
 
-    def connected_ids(self, subset=None, show_ipv4=False):
+    def connected_ids(self, subset=None, show_ipv4=False, include_localhost=False):
         '''
         Return a set of all connected minion ids, optionally within a subset
         '''
@@ -567,7 +580,9 @@ class CkMinions(object):
                 except (AttributeError, IOError, OSError):
                     continue
                 for ipv4 in grains.get('ipv4', []):
-                    if ipv4 == '127.0.0.1' or ipv4 == '0.0.0.0':
+                    if ipv4 == '127.0.0.1' and not include_localhost:
+                        continue
+                    if ipv4 == '0.0.0.0':
                         continue
                     if ipv4 in addrs:
                         if show_ipv4:
@@ -631,14 +646,6 @@ class CkMinions(object):
                'E': 'pcre',
                'N': 'node',
                None: 'glob'}
-        infinite = [
-                'node',
-                'ipcidr',
-                'pillar',
-                'pillar_pcre']
-        if not self.opts.get('minion_data_cache', False):
-            infinite.append('grain')
-            infinite.append('grain_pcre')
 
         target_info = parse_target(valid)
         if not target_info:
@@ -647,12 +654,6 @@ class CkMinions(object):
         v_matcher = ref.get(target_info['engine'])
         v_expr = target_info['pattern']
 
-        if v_matcher in infinite:
-            # We can't be sure what the subset is, only match the identical
-            # target
-            if v_matcher != expr_form:
-                return False
-            return v_expr == expr
         v_minions = set(self.check_minions(v_expr, v_matcher))
         minions = set(self.check_minions(expr, expr_form))
         d_bool = not bool(minions.difference(v_minions))

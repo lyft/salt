@@ -1,3 +1,5 @@
+.. _coding-style:
+
 =================
 Salt Coding Style
 =================
@@ -15,18 +17,43 @@ no grounds to treat others without respect, especially people working to
 improve Salt)!!
 
 
+.. _pylint-instructions:
+
 Linting
 =======
 
-Most Salt style conventions are codified in Salt's ``.pylintrc`` file. This file
-is found in the root of the Salt project and can be passed as an argument to the
-pylint_ program as follows:
+Most Salt style conventions are codified in Salt's ``.pylintrc`` file. Salt's
+pylint file has two dependencies: pylint_ and saltpylint_. You can install
+these dependencies with ``pip``:
+
+.. code-block:: bash
+
+    pip install pylint
+    pip install saltpylint
+
+The ``.pylintrc`` file is found in the root of the Salt project and can be passed
+as an argument to the pylint_ program as follows:
 
 .. code-block:: bash
 
     pylint --rcfile=/path/to/salt/.pylintrc salt/dir/to/lint
 
 .. _pylint: http://www.pylint.org
+.. _saltpylint: https://github.com/saltstack/salt-pylint
+
+Variables
+=========
+
+Variables should be a minimum of three characters and should provide an
+easy-to-understand name of the object being represented.
+
+When keys and values are iterated over, descriptive names should be used
+to represent the temporary variables.
+
+Multi-word variables should be separated by an underscore.
+
+Variables which are two-letter words should have an underscore appended
+to them to pad them to three characters.
 
 Strings
 =======

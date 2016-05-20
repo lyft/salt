@@ -6,7 +6,9 @@ Watch files and translate the changes into salt events
 
 :Caution:   Using generic mask options like open, access, ignored, and
             closed_nowrite with reactors can easily cause the reactor
-            to loop on itself.
+            to loop on itself. To mitigate this behavior, consider
+            setting the `disable_during_state_run` flag to `True` in
+            the beacon configuration.
 
 '''
 # Import Python libs
@@ -93,44 +95,39 @@ def validate(config):
     ]
 
     # Configuration for diskusage beacon should be a list of dicts
+    log.debug('config {0}'.format(config))
     if not isinstance(config, dict):
-        log.info('Configuration for inotify beacon must be a dictionary.')
-        return False
+        return False, 'Configuration for inotify beacon must be a dictionary.'
     else:
         for config_item in config:
             if not isinstance(config[config_item], dict):
-                log.info('Configuration for inotify beacon must '
-                         'be a dictionary of dictionaries.')
-                return False
+                return False, ('Configuration for inotify beacon must '
+                               'be a dictionary of dictionaries.')
             else:
                 if not any(j in ['mask', 'recurse', 'auto_add'] for j in config[config_item]):
-                    log.info('Configuration for inotify beacon must '
-                             'contain mask, recurse or auto_add items.')
-                    return False
+                    return False, ('Configuration for inotify beacon '
+                                   'must contain mask, recurse or auto_add items.')
 
             if 'auto_add' in config[config_item]:
                 if not isinstance(config[config_item]['auto_add'], bool):
-                    log.info('Configuration for inotify beacon '
-                             'auto_add must be boolean.')
-                    return False
+                    return False, ('Configuration for inotify beacon '
+                                   'auto_add must be boolean.')
 
             if 'recurse' in config[config_item]:
                 if not isinstance(config[config_item]['recurse'], bool):
-                    log.info('Configuration for inotify beacon '
-                             'recurse must be boolean.')
-                    return False
+                    return False, ('Configuration for inotify beacon '
+                                   ' recurse must be boolean.')
 
             if 'mask' in config[config_item]:
                 if not isinstance(config[config_item]['mask'], list):
-                    log.info('Configuration for inotify beacon '
-                             'mask must be list.')
-                    return False
+                    return False, ('Configuration for inotify beacon '
+                                   ' mask must be list.')
+
                 for mask in config[config_item]['mask']:
                     if mask not in VALID_MASK:
-                        log.info('Configuration for inotify beacon '
-                                 'invalid mask option {0}.'.format(mask))
-                        return False
-    return True
+                        return False, ('Configuration for inotify beacon '
+                                       'invalid mask option {0}.'.format(mask))
+    return True, 'Valid beacon configuration'
 
 
 def beacon(config):

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 '''
-Salt module to manage unix mounts and the fstab file
+Salt module to manage Unix mounts and the fstab file
 '''
 
 # Import python libs
@@ -143,12 +143,17 @@ def _active_mounts_openbsd(ret):
         nod = __salt__['cmd.run_stdout']('ls -l {0}'.format(comps[0]))
         nod = ' '.join(nod.split()).split(" ")
         parens = re.findall(r'\((.*?)\)', line, re.DOTALL)
-        ret[comps[3]] = {'device': comps[0],
+        if len(parens) > 1:
+            ret[comps[3]] = {'device': comps[0],
                          'fstype': comps[5],
                          'opts': parens[1].split(", "),
                          'major': str(nod[4].strip(",")),
                          'minor': str(nod[5]),
                          'device_uuid': parens[0]}
+        else:
+            ret[comps[2]] = {'device': comps[0],
+                            'fstype': comps[4],
+                            'opts': parens[0].split(", ")}
     return ret
 
 
@@ -198,7 +203,7 @@ def active(extended=False):
 class _fstab_entry(object):
     '''
     Utility class for manipulating fstab entries. Primarily we're parsing,
-    formating, and comparing lines. Parsing emits dicts expected from
+    formatting, and comparing lines. Parsing emits dicts expected from
     fstab() or raises a ValueError.
 
     Note: We'll probably want to use os.normpath and os.normcase on 'name'
@@ -304,7 +309,7 @@ def rm_fstab(name, device, config='/etc/fstab'):
 
     .. code-block:: bash
 
-        salt '*' mount.rm_fstab /mnt/foo
+        salt '*' mount.rm_fstab /mnt/foo /dev/sdg
     '''
     modified = False
 
@@ -471,7 +476,7 @@ def rm_automaster(name, device, config='/etc/auto_salt'):
 
     .. code-block:: bash
 
-        salt '*' mount.rm_automaster /mnt/foo
+        salt '*' mount.rm_automaster /mnt/foo /dev/sdg
     '''
     contents = automaster(config)
     if name not in contents:
@@ -644,13 +649,13 @@ def set_automaster(
 
 def automaster(config='/etc/auto_salt'):
     '''
-    List the contents of the fstab
+    List the contents of the auto master
 
     CLI Example:
 
     .. code-block:: bash
 
-        salt '*' mount.fstab
+        salt '*' mount.automaster
     '''
     ret = {}
     if not os.path.isfile(config):
@@ -767,7 +772,8 @@ def umount(name, device=None, user=None):
 
         salt '*' mount.umount /mnt/foo
 
-        .. versionadded:: 2015.5.0
+    .. versionadded:: 2015.5.0
+    .. code-block:: bash
 
         salt '*' mount.umount /mnt/foo /dev/xvdc1
     '''
