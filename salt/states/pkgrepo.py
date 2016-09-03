@@ -270,6 +270,13 @@ def managed(name, ppa=None, **kwargs):
         ret['comment'] = 'Repo management not implemented on this platform'
         return ret
 
+    if 'repo' in kwargs:
+        ret['result'] = False
+        ret['comment'] = ('\'repo\' is not a supported argument for this '
+                          'state. The \'name\' argument is probably what was '
+                          'intended.')
+        return ret
+
     repo = name
     if __grains__['os'] == 'Ubuntu':
         if ppa is not None:
@@ -383,7 +390,8 @@ def managed(name, ppa=None, **kwargs):
 
     # empty file before configure
     if kwargs.get('clean_file', False):
-        salt.utils.fopen(kwargs['file'], 'w').close()
+        with salt.utils.fopen(kwargs['file'], 'w'):
+            pass
 
     try:
         if __grains__['os_family'] == 'Debian':

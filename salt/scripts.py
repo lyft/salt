@@ -81,6 +81,8 @@ def minion_process(queue):
     try:
         minion = salt.cli.daemons.Minion()
         minion.start()
+    except ImportError as exc:
+        log.error(exc)
     except (Exception, SaltClientError, SaltReqTimeoutError, SaltSystemExit) as exc:
         log.error(
             'Minion failed to start: {0}'.format(get_error_message(exc)),
@@ -88,7 +90,7 @@ def minion_process(queue):
         )
         restart = True
     except SystemExit as exc:
-        restart = False
+        log.error(exc)
 
     if restart is True:
         log.warning('Fatal functionality error caught by minion handler:\n', exc_info=True)
@@ -113,6 +115,9 @@ def salt_minion():
     '''
     Start the salt minion.
     '''
+    import salt.utils.process
+    salt.utils.process.notify_systemd()
+
     import salt.cli.daemons
     import multiprocessing
     if '' in sys.path:
@@ -270,6 +275,9 @@ def salt_syndic():
     '''
     Start the salt syndic.
     '''
+    import salt.utils.process
+    salt.utils.process.notify_systemd()
+
     import salt.cli.daemons
     pid = os.getpid()
     try:
@@ -442,6 +450,9 @@ def salt_api():
     '''
     The main function for salt-api
     '''
+    import salt.utils.process
+    salt.utils.process.notify_systemd()
+
     import salt.cli.api
     sapi = salt.cli.api.SaltAPI()  # pylint: disable=E1120
     sapi.run()

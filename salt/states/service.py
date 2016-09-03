@@ -62,13 +62,21 @@ service, then set the reload value to True:
 from __future__ import absolute_import
 import time
 
+__virtualname__ = 'service'
+
 
 def __virtual__():
     '''
     Only make these states available if a service provider has been detected or
     assigned for this minion
     '''
-    return 'service.start' in __salt__
+    if 'service.start' in __salt__:
+        return __virtualname__
+    else:
+        return (False, 'No service execution module loaded: '
+                'check support for service management on {0} '
+                ''.format(__grains__.get('osfinger', __grains__['os']))
+               )
 
 
 def _enabled_used_error(ret):
@@ -270,7 +278,7 @@ def _available(name, ret):
 
 def running(name, enable=None, sig=None, init_delay=None, **kwargs):
     '''
-    Verify that the service is running
+    Ensure that the service is running
 
     name
         The name of the init or rc script used to manage the service
@@ -438,7 +446,7 @@ def dead(name, enable=None, sig=None, **kwargs):
 
 def enabled(name, **kwargs):
     '''
-    Verify that the service is enabled on boot, only use this state if you
+    Ensure that the service is enabled on boot, only use this state if you
     don't want to manage the running process, remember that if you want to
     enable a running service to use the enable: True option for the running
     or dead function.
@@ -457,7 +465,7 @@ def enabled(name, **kwargs):
 
 def disabled(name, **kwargs):
     '''
-    Verify that the service is disabled on boot, only use this state if you
+    Ensure that the service is disabled on boot, only use this state if you
     don't want to manage the running process, remember that if you want to
     disable a service to use the enable: False option for the running or dead
     function.
@@ -526,8 +534,6 @@ def mod_watch(name,
                 func = __salt__['service.restart']
                 verb = 'restart'
         else:
-            if 'service.stop' in __salt__:
-                __salt__['service.stop'](name)
             func = __salt__['service.start']
             verb = 'start'
         if not past_participle:
@@ -541,6 +547,10 @@ def mod_watch(name,
         ret['result'] = None
         ret['comment'] = 'Service is set to be {0}'.format(past_participle)
         return ret
+
+    if verb == 'start' and 'service.stop' in __salt__:
+        # stop service before start
+        __salt__['service.stop'](name)
 
     result = func(name)
     if init_delay:

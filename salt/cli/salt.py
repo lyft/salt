@@ -79,7 +79,10 @@ class SaltCMD(parsers.SaltCMDOptionParser):
                 if not self.options.batch:
                     self.config['batch'] = '100%'
 
-                batch = salt.cli.batch.Batch(self.config, eauth=eauth, quiet=True)
+                try:
+                    batch = salt.cli.batch.Batch(self.config, eauth=eauth, quiet=True)
+                except salt.exceptions.SaltClientError as exc:
+                    sys.exit(2)
 
                 ret = {}
 
@@ -250,6 +253,8 @@ class SaltCMD(parsers.SaltCMDOptionParser):
         not_connected_minions = []
         for each_minion in ret:
             minion_ret = ret[each_minion]
+            if isinstance(minion_ret, dict) and 'ret' in minion_ret:
+                minion_ret = ret[each_minion].get('ret')
             if (
                     isinstance(minion_ret, string_types)
                     and minion_ret.startswith("Minion did not return")

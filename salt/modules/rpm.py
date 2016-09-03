@@ -571,7 +571,7 @@ def info(*packages, **attr):
     return ret
 
 
-def version_cmp(ver1, ver2):
+def version_cmp(ver1, ver2, ignore_epoch=False):
     '''
     .. versionadded:: 2015.8.9
 
@@ -579,26 +579,128 @@ def version_cmp(ver1, ver2):
     ver1 == ver2, and 1 if ver1 > ver2. Return None if there was a problem
     making the comparison.
 
+    ignore_epoch : False
+        Set to ``True`` to ignore the epoch when comparing versions
+
+        .. versionadded:: 2015.8.10,2016.3.2
+
     CLI Example:
 
     .. code-block:: bash
 
         salt '*' pkg.version_cmp '0.2-001' '0.2.0.1-002'
     '''
+    normalize = lambda x: str(x).split(':', 1)[-1] if ignore_epoch else str(x)
+    ver1 = normalize(ver1)
+    ver2 = normalize(ver2)
+
     try:
+        cmp_func = None
         if HAS_RPM:
-            cmp_func = rpm.labelCompare
-        elif HAS_RPMUTILS:
-            cmp_func = rpmUtils.miscutils.compareEVR
+            try:
+                cmp_func = rpm.labelCompare
+            except AttributeError:
+                # Catches corner case where someone has a module named "rpm" in
+                # their pythonpath.
+                log.debug(
+                    'rpm module imported, but it does not have the '
+                    'labelCompare function. Not using rpm.labelCompare for '
+                    'version comparison.'
+                )
+        if cmp_func is None and HAS_RPMUTILS:
+            try:
+                cmp_func = rpmUtils.miscutils.compareEVR
+            except AttributeError:
+                log.debug('rpmUtils.miscutils.compareEVR is not available')
+
+        if cmp_func is None:
+            if salt.utils.which('rpmdev-vercmp'):
+                # rpmdev-vercmp always uses epochs, even when zero
+                def _ensure_epoch(ver):
+                    def _prepend(ver):
+                        return '0:{0}'.format(ver)
+
+                    try:
+                        if ':' not in ver:
+                            return _prepend(ver)
+                    except TypeError:
+                        return _prepend(ver)
+                    return ver
+
+                ver1 = _ensure_epoch(ver1)
+                ver2 = _ensure_epoch(ver2)
+                result = __salt__['cmd.run'](['rpmdev-vercmp', ver1, ver2],
+                                             python_shell=False,
+                                             ignore_retcode=True).strip()
+                if result.endswith('equal'):
+                    return 0
+                elif 'is newer' in result:
+                    newer_version = result.split()[0]
+                    if newer_version == ver1:
+                        return 1
+                    elif newer_version == ver2:
+                        return -1
+                log.warning(
+                    'Failed to interpret results of rpmdev-vercmp output: %s',
+                    result
+                )
+            else:
+                # We'll need to fall back to salt.utils.version_cmp()
+                log.warning(
+                    'rpmdevtools is not installed, please install it for '
+                    'more accurate version comparisons'
+                )
         else:
-            cmp_func = None
-        cmp_result = cmp_func is None and 2 or cmp_func(salt.utils.str_version_to_evr(ver1),
-                                                        salt.utils.str_version_to_evr(ver2))
-        if cmp_result not in (-1, 0, 1):
-            raise Exception("Comparison result '{0}' is invalid".format(cmp_result))
+            # If one EVR is missing a release but not the other and they
+            # otherwise would be equal, ignore the release. This can happen if
+            # e.g. you are checking if a package version 3.2 is satisfied by
+            # 3.2-1.
+            (ver1_e, ver1_v, ver1_r) = salt.utils.str_version_to_evr(ver1)
+            (ver2_e, ver2_v, ver2_r) = salt.utils.str_version_to_evr(ver2)
+            if not ver1_r or not ver2_r:
+                ver1_r = ver2_r = ''
 
-        return cmp_result
+            cmp_result = cmp_func((ver1_e, ver1_v, ver1_r),
+                                  (ver2_e, ver2_v, ver2_r))
+            if cmp_result not in (-1, 0, 1):
+                raise CommandExecutionError(
+                    'Comparison result \'{0}\' is invalid'.format(cmp_result)
+                )
+            return cmp_result
+
     except Exception as exc:
-        log.warning("Failed to compare version '{0}' to '{1}' using RPM: {2}".format(ver1, ver2, exc))
+        log.warning(
+            'Failed to compare version \'%s\' to \'%s\' using RPM: %s',
+            ver1, ver2, exc
+        )
 
-    return salt.utils.version_cmp(ver1, ver2)
+    # We would already have normalized the versions at the beginning of this
+    # function if ignore_epoch=True, so avoid unnecessary work and just pass
+    # False for this value.
+    return salt.utils.version_cmp(ver1, ver2, ignore_epoch=False)
+
+
+def checksum(*paths):
+    '''
+    Return if the signature of a RPM file is valid.
+
+    CLI Example:
+
+    .. code-block:: bash
+
+        salt '*' lowpkg.checksum /path/to/package1.rpm
+        salt '*' lowpkg.checksum /path/to/package1.rpm /path/to/package2.rpm
+    '''
+    ret = dict()
+
+    if not paths:
+        raise CommandExecutionError("No package files has been specified.")
+
+    for package_file in paths:
+        ret[package_file] = (bool(__salt__['file.file_exists'](package_file)) and
+                            not __salt__['cmd.retcode'](["rpm", "-K", "--quiet", package_file],
+                                                        ignore_retcode=True,
+                                                        output_loglevel='trace',
+                                                        python_shell=False))
+
+    return ret

@@ -963,6 +963,7 @@ _OS_FAMILY_MAP = {
     'SUSE': 'Suse',
     'openSUSE Leap': 'Suse',
     'openSUSE Tumbleweed': 'Suse',
+    'SLES_SAP': 'Suse',
     'Solaris': 'Solaris',
     'SmartOS': 'Solaris',
     'OpenIndiana Development': 'Solaris',
@@ -1113,7 +1114,7 @@ def os_data():
                         edge_len = max(len(x) for x in supported_inits) - 1
                         buf_size = __opts__['file_buffer_size']
                         try:
-                            with open(init_bin, 'rb') as fp_:
+                            with salt.utils.fopen(init_bin, 'rb') as fp_:
                                 buf = True
                                 edge = ''
                                 buf = fp_.read(buf_size).lower()
@@ -1175,6 +1176,14 @@ def os_data():
                         grains['lsb_distrib_release'] = os_release['VERSION_ID']
                     if 'PRETTY_NAME' in os_release:
                         grains['lsb_distrib_codename'] = os_release['PRETTY_NAME']
+                    if 'CPE_NAME' in os_release:
+                        if ":suse:" in os_release['CPE_NAME'] or ":opensuse:" in os_release['CPE_NAME']:
+                            grains['os'] = "SUSE"
+                            # openSUSE `osfullname` grain normalization
+                            if os_release.get("NAME") == "openSUSE Leap":
+                                grains['osfullname'] = "Leap"
+                            elif os_release.get("VERSION") == "Tumbleweed":
+                                grains['osfullname'] = os_release["VERSION"]
                 elif os.path.isfile('/etc/SuSE-release'):
                     grains['lsb_distrib_id'] = 'SUSE'
                     version = ''
@@ -1282,7 +1291,8 @@ def os_data():
         shortname = distroname.replace(' ', '').lower()[:10]
         # this maps the long names from the /etc/DISTRO-release files to the
         # traditional short names that Salt has used.
-        grains['os'] = _OS_NAME_MAP.get(shortname, distroname)
+        if 'os' not in grains:
+            grains['os'] = _OS_NAME_MAP.get(shortname, distroname)
         grains.update(_linux_cpudata())
         grains.update(_linux_gpu_data())
     elif grains['kernel'] == 'SunOS':
@@ -1456,58 +1466,30 @@ def append_domain():
     return grain
 
 
-def ip4():
+def ip_fqdn():
     '''
-    Return a list of ipv4 addrs
+    Return ip address and FQDN grains
     '''
-
     if salt.utils.is_proxy():
         return {}
 
-    return {'ipv4': salt.utils.network.ip_addrs(include_loopback=True)}
+    ret = {}
+    ret['ipv4'] = salt.utils.network.ip_addrs(include_loopback=True)
+    ret['ipv6'] = salt.utils.network.ip_addrs6(include_loopback=True)
 
+    _fqdn = hostname()['fqdn']
+    for socket_type, ipv_num in ((socket.AF_INET, '4'), (socket.AF_INET6, '6')):
+        key = 'fqdn_ip' + ipv_num
+        if not ret['ipv' + ipv_num]:
+            ret[key] = []
+        else:
+            try:
+                info = socket.getaddrinfo(_fqdn, None, socket_type)
+                ret[key] = list(set(item[4][0] for item in info))
+            except socket.error:
+                ret[key] = []
 
-def fqdn_ip4():
-    '''
-    Return a list of ipv4 addrs of fqdn
-    '''
-
-    if salt.utils.is_proxy():
-        return {}
-
-    try:
-        info = socket.getaddrinfo(hostname()['fqdn'], None, socket.AF_INET)
-        addrs = list(set(item[4][0] for item in info))
-    except socket.error:
-        addrs = []
-    return {'fqdn_ip4': addrs}
-
-
-def ip6():
-    '''
-    Return a list of ipv6 addrs
-    '''
-
-    if salt.utils.is_proxy():
-        return {}
-
-    return {'ipv6': salt.utils.network.ip_addrs6(include_loopback=True)}
-
-
-def fqdn_ip6():
-    '''
-    Return a list of ipv6 addrs of fqdn
-    '''
-
-    if salt.utils.is_proxy():
-        return {}
-
-    try:
-        info = socket.getaddrinfo(hostname()['fqdn'], None, socket.AF_INET6)
-        addrs = list(set(item[4][0] for item in info))
-    except socket.error:
-        addrs = []
-    return {'fqdn_ip6': addrs}
+    return ret
 
 
 def ip_interfaces():

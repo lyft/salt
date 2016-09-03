@@ -203,7 +203,8 @@ def assumed_creds(prov_dict, role_arn, location=None):
 
 def sig4(method, endpoint, params, prov_dict,
          aws_api_version=DEFAULT_AWS_API_VERSION, location=None,
-         product='ec2', uri='/', requesturl=None, data='', role_arn=None):
+         product='ec2', uri='/', requesturl=None, data='',
+         role_arn=None, payload_hash=None):
     '''
     Sign a query against AWS services using Signature Version 4 Signing
     Process. This is documented at:
@@ -250,7 +251,8 @@ def sig4(method, endpoint, params, prov_dict,
 
     # Create payload hash (hash of the request body content). For GET
     # requests, the payload is an empty string ('').
-    payload_hash = hashlib.sha256(data).hexdigest()
+    if not payload_hash:
+        payload_hash = hashlib.sha256(data).hexdigest()
 
     # Combine elements to create create canonical request
     canonical_request = '\n'.join((
@@ -552,7 +554,7 @@ def get_region_from_metadata():
     return None
 
 
-def get_location(opts, provider=None):
+def get_location(opts=None, provider=None):
     '''
     Return the region to use, in this order:
         opts['location']
@@ -560,6 +562,8 @@ def get_location(opts, provider=None):
         get_region_from_metadata()
         DEFAULT_LOCATION
     '''
+    if opts is None:
+        opts = __opts__
     ret = opts.get('location', provider.get('location'))
     if ret is None:
         ret = get_region_from_metadata()

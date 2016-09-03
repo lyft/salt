@@ -198,11 +198,15 @@ def diff_mtime_map(map1, map2):
     '''
     # check if the mtimes are the same
     if sorted(map1) != sorted(map2):
-        #log.debug('diff_mtime_map: the maps are different')
         return True
 
+    # map1 and map2 are guaranteed to have same keys,
+    # so compare mtimes
+    for filename, mtime in six.iteritems(map1):
+        if map2[filename] != mtime:
+            return True
+
     # we made it, that means we have no changes
-    #log.debug('diff_mtime_map: the maps are the same')
     return False
 
 
@@ -723,7 +727,12 @@ class FSChan(object):
         self.kwargs = kwargs
         self.fs = Fileserver(self.opts)
         self.fs.init()
-        self.fs.update()
+        if self.opts.get('file_client', 'remote') == 'local':
+            if '__fs_update' not in self.opts:
+                self.fs.update()
+                self.opts['__fs_update'] = True
+        else:
+            self.fs.update()
         self.cmd_stub = {'ext_nodes': {}}
 
     def send(self, load, tries=None, timeout=None):

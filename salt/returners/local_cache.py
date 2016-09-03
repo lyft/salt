@@ -72,6 +72,8 @@ def _walk_through(job_dir):
             if not os.path.isfile(load_path):
                 continue
 
+            # serial.load() closes the filehandle, no need to enclose this in a
+            # "with" block.
             job = serial.load(salt.utils.fopen(load_path, 'rb'))
             jid = job['jid']
             yield jid, job, t_path, final
@@ -255,6 +257,11 @@ def save_minions(jid, minions, syndic_id=None):
         minions_path = os.path.join(jid_dir, MINIONS_P)
 
     try:
+        if not os.path.exists(jid_dir):
+            try:
+                os.makedirs(jid_dir)
+            except OSError:
+                pass
         serial.dump(minions, salt.utils.fopen(minions_path, 'w+b'))
     except IOError as exc:
         log.error(
@@ -384,6 +391,9 @@ def clean_old_jobs():
         for top in os.listdir(jid_root):
             t_path = os.path.join(jid_root, top)
 
+            if not os.path.exists(t_path):
+                continue
+
             # Check if there are any stray/empty JID t_path dirs
             t_path_dirs = os.listdir(t_path)
             if not t_path_dirs and t_path not in dirs_to_remove:
@@ -393,14 +403,14 @@ def clean_old_jobs():
             for final in t_path_dirs:
                 f_path = os.path.join(t_path, final)
                 jid_file = os.path.join(f_path, 'jid')
-                if not os.path.isfile(jid_file):
+                if not os.path.isfile(jid_file) and os.path.exists(t_path):
                     # No jid file means corrupted cache entry, scrub it
                     # by removing the entire t_path directory
                     shutil.rmtree(t_path)
-                else:
+                elif os.path.isfile(jid_file):
                     jid_ctime = os.stat(jid_file).st_ctime
                     hours_difference = (cur - jid_ctime) / 3600.0
-                    if hours_difference > __opts__['keep_jobs']:
+                    if hours_difference > __opts__['keep_jobs'] and os.path.exists(t_path):
                         # Remove the entire t_path from the original JID dir
                         shutil.rmtree(t_path)
 

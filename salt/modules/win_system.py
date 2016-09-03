@@ -287,7 +287,7 @@ def set_computer_name(name):
 
     if windll.kernel32.SetComputerNameExW(win32con.ComputerNamePhysicalDnsHostname,
                                           name):
-        ret = {'Computer Name': {'Current': get_system_info()['name']}}
+        ret = {'Computer Name': {'Current': get_computer_name()}}
         pending = get_pending_computer_name()
         if pending not in (None, False):
             ret['Computer Name']['Pending'] = pending
@@ -315,8 +315,8 @@ def get_pending_computer_name():
     '''
     current = get_computer_name()
     pending = read_value('HKLM',
-                         r'SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName',
-                         'ComputerName')['vdata']
+                         r'SYSTEM\CurrentControlSet\Services\Tcpip\Parameters',
+                         'NV Hostname')['vdata']
     if pending:
         return pending if pending != current else None
     return False
@@ -335,7 +335,7 @@ def get_computer_name():
 
         salt 'minion-id' system.get_computer_name
     '''
-    name = get_system_info()['name']
+    name = win32api.GetComputerNameEx(win32con.ComputerNamePhysicalDnsHostname)
     return name if name else False
 
 
@@ -468,7 +468,10 @@ def join_domain(domain,
         ``ou=computers,ou=departm_432,dc=my-company,dc=com``
 
     :param bool account_exists:
-        Needs to be set to ``True`` to allow re-using an existing account
+        If set to ``True`` the computer will only join the domain if the account
+        already exists. If set to ``False`` the computer account will be created
+        if it does not exist, otherwise it will use the existing account.
+        Default is False
 
     :param bool restart: Restarts the computer after a successful join
     .. versionadded:: 2015.5.7
@@ -561,7 +564,8 @@ def unjoin_domain(username=None,
     .. versionadded:: 2015.8.2
 
     :param bool disable:
-        Disable the user account in Active Directory. True to disable.
+        Disable the computer account in Active Directory. True to disable.
+        Default is False
 
     :param bool restart: Restart the computer after successful unjoin
 
@@ -754,17 +758,17 @@ def set_system_date_time(years=None,
         return False
 
     # Check for passed values. If not passed, use current values
-    if not years:
+    if years is None:
         years = date_time[0]
-    if not months:
+    if months is None:
         months = date_time[1]
-    if not days:
+    if days is None:
         days = date_time[3]
-    if not hours:
+    if hours is None:
         hours = date_time[4]
-    if not minutes:
+    if minutes is None:
         minutes = date_time[5]
-    if not seconds:
+    if seconds is None:
         seconds = date_time[6]
 
     # Create the time tuple to be passed to SetLocalTime, including day_of_week

@@ -170,7 +170,7 @@ def returner(ret):
     _close_conn(conn)
 
 
-def save_load(jid, load):
+def save_load(jid, load, minions=None):
     '''
     Save the load to the specified jid
     '''
@@ -204,7 +204,7 @@ def get_load(jid):
                 {'jid': jid})
     data = cur.fetchone()
     if data:
-        return json.loads(data)
+        return json.loads(data[0].encode())
     _close_conn(conn)
     return {}
 

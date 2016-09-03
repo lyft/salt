@@ -74,7 +74,8 @@ def recv(files, dest):
             return 'Destination unavailable'
 
         try:
-            salt.utils.fopen(final, 'w+').write(data)
+            with salt.utils.fopen(final, 'w+') as fp_:
+                fp_.write(data)
             ret[final] = True
         except IOError:
             ret[final] = False
@@ -195,6 +196,20 @@ def get_file(path,
     Use the *gzip* named argument to enable it.  Valid values are 1..9, where 1
     is the lightest compression and 9 the heaviest.  1 uses the least CPU on
     the master (and minion), 9 uses the most.
+
+    There are two ways of defining the fileserver environment (a.k.a.
+    ``saltenv``) from which to retrieve the file. One is to use the ``saltenv``
+    parameter, and the other is to use a querystring syntax in the ``salt://``
+    URL. The below two examples are equivalent:
+
+    .. code-block:: bash
+
+        salt '*' cp.get_file salt://foo/bar.conf /etc/foo/bar.conf saltenv=config
+        salt '*' cp.get_file salt://foo/bar.conf?saltenv=config /etc/foo/bar.conf
+
+    .. note::
+        It may be necessary to quote the URL when using the querystring method,
+        depending on the shell being used to run the command.
     '''
     if env is not None:
         salt.utils.warn_until(
@@ -357,6 +372,20 @@ def cache_file(path, saltenv='base', env=None):
     .. code-block:: bash
 
         salt '*' cp.cache_file salt://path/to/file
+
+    There are two ways of defining the fileserver environment (a.k.a.
+    ``saltenv``) from which to cache the file. One is to use the ``saltenv``
+    parameter, and the other is to use a querystring syntax in the ``salt://``
+    URL. The below two examples are equivalent:
+
+    .. code-block:: bash
+
+        salt '*' cp.cache_file salt://foo/bar.conf saltenv=config
+        salt '*' cp.cache_file salt://foo/bar.conf?saltenv=config
+
+    .. note::
+        It may be necessary to quote the URL when using the querystring method,
+        depending on the shell being used to run the command.
     '''
     if env is not None:
         salt.utils.warn_until(
@@ -415,6 +444,30 @@ def cache_files(paths, saltenv='base', env=None):
     .. code-block:: bash
 
         salt '*' cp.cache_files salt://pathto/file1,salt://pathto/file1
+
+    There are two ways of defining the fileserver environment (a.k.a.
+    ``saltenv``) from which to cache the files. One is to use the ``saltenv``
+    parameter, and the other is to use a querystring syntax in the ``salt://``
+    URL. The below two examples are equivalent:
+
+    .. code-block:: bash
+
+        salt '*' cp.cache_files salt://foo/bar.conf,salt://foo/baz.conf saltenv=config
+        salt '*' cp.cache_files salt://foo/bar.conf?saltenv=config,salt://foo/baz.conf?saltenv=config
+
+    The querystring method is less useful when all files are being cached from
+    the same environment, but is a good way of caching files from multiple
+    different environments in the same command. For example, the below command
+    will cache the first file from the ``config1`` environment, and the second
+    one from the ``config2`` environment.
+
+    .. code-block:: bash
+
+        salt '*' cp.cache_files salt://foo/bar.conf?saltenv=config1,salt://foo/bar.conf?saltenv=config2
+
+    .. note::
+        It may be necessary to quote the URL when using the querystring method,
+        depending on the shell being used to run the command.
     '''
     if env is not None:
         salt.utils.warn_until(
@@ -729,9 +782,19 @@ def push(path, keep_symlinks=False, upload_path=None):
         load_path = upload_path.lstrip(os.sep)
     else:
         load_path = path.lstrip(os.sep)
+    # Normalize the path. This does not eliminate
+    # the possibility that relative entries will still be present
+    load_path_normal = os.path.normpath(load_path)
+
+    # If this is Windows and a drive letter is present, remove it
+    load_path_split_drive = os.path.splitdrive(load_path_normal)[1:]
+
+    # Finally, split the remaining path into a list for delivery to the master
+    load_path_list = os.path.split(load_path_split_drive)
+
     load = {'cmd': '_file_recv',
             'id': __opts__['id'],
-            'path': load_path,
+            'path': load_path_list,
             'tok': auth.gen_token('salt')}
     channel = salt.transport.Channel.factory(__opts__)
     with salt.utils.fopen(path, 'rb') as fp_:
@@ -787,6 +850,8 @@ def push_dir(path, glob=None, upload_path=None):
             filelist += [os.path.join(root, tmpfile) for tmpfile in files]
         if glob is not None:
             filelist = [fi for fi in filelist if fnmatch.fnmatch(fi, glob)]
+        if not filelist:
+            return False
         for tmpfile in filelist:
             if upload_path and tmpfile.startswith(path):
                 tmpupload_path = os.path.join(os.path.sep,

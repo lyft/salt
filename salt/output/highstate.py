@@ -188,7 +188,8 @@ def _format_host(host, data):
                               .format(ret.get('duration', 0)))
 
             tcolor = colors['GREEN']
-            schanged, ctext = _format_changes(ret['changes'])
+            orchestration = ret.get('__orchestration__', False)
+            schanged, ctext = _format_changes(ret['changes'], orchestration)
             nchanges += 1 if schanged else 0
 
             # Skip this state if it was successful & diff output was requested
@@ -423,7 +424,7 @@ def _format_host(host, data):
                                                line_max_len - 7)
         hstrs.append(colorfmt.format(colors['CYAN'], totals, colors))
 
-        if __opts__.get('state_output_profile', False):
+        if __opts__.get('state_output_profile', True):
             sum_duration = sum(rdurations)
             duration_unit = 'ms'
             # convert to seconds if duration is 1000ms or more
@@ -441,14 +442,36 @@ def _format_host(host, data):
     return u'\n'.join(hstrs), nchanges > 0
 
 
-def _format_changes(changes):
+def _nested_changes(changes):
     '''
-    Format the changes dict based on what the data is
+    Print the changes data using the nested outputter
     '''
     global __opts__  # pylint: disable=W0601
 
+    opts = __opts__.copy()
+    # Pass the __opts__ dict. The loader will splat this modules __opts__ dict
+    # anyway so have to restore it after the other outputter is done
+    if __opts__['color']:
+        __opts__['color'] = u'CYAN'
+    __opts__['nested_indent'] = 14
+    ret = u'\n'
+    ret += salt.output.out_format(
+            changes,
+            'nested',
+            __opts__)
+    __opts__ = opts
+    return ret
+
+
+def _format_changes(changes, orchestration=False):
+    '''
+    Format the changes dict based on what the data is
+    '''
     if not changes:
         return False, u''
+
+    if orchestration:
+        return True, _nested_changes(changes)
 
     if not isinstance(changes, dict):
         return True, u'Invalid Changes data: {0}'.format(changes)
@@ -463,18 +486,7 @@ def _format_changes(changes):
             changed = changed or c
     else:
         changed = True
-        opts = __opts__.copy()
-        # Pass the __opts__ dict. The loader will splat this modules __opts__ dict
-        # anyway so have to restore it after the other outputter is done
-        if __opts__['color']:
-            __opts__['color'] = u'CYAN'
-        __opts__['nested_indent'] = 14
-        ctext = u'\n'
-        ctext += salt.output.out_format(
-                changes,
-                'nested',
-                __opts__)
-        __opts__ = opts
+        ctext = _nested_changes(changes)
     return changed, ctext
 
 
@@ -491,14 +503,14 @@ def _format_terse(tcolor, comps, ret, colors, tabular):
         result = u'Differs'
     if tabular is True:
         fmt_string = u'{0}'
-        if __opts__.get('state_output_profile', False):
+        if __opts__.get('state_output_profile', True):
             fmt_string += u'{6[start_time]!s} [{6[duration]!s} ms] '
         fmt_string += u'{2:>10}.{3:<10} {4:7}   Name: {1}{5}'
     elif isinstance(tabular, str):
         fmt_string = tabular
     else:
         fmt_string = u' {0} Name: {1} - Function: {2}.{3} - Result: {4}'
-        if __opts__.get('state_output_profile', False):
+        if __opts__.get('state_output_profile', True):
             fmt_string += u' Started: - {6[start_time]!s} Duration: {6[duration]!s} ms'
         fmt_string += u'{5}'
 

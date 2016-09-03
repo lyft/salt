@@ -19,7 +19,7 @@ option. This will give users a couple release cycles to modify their scripts,
 SLS files, etc. to use the new functionality, rather than forcing users to
 change everything immediately.
 
-In the **Carbon** release of Salt (due in 2016), this execution module will
+In the **Nitrogen** release of Salt (due in 2017), this execution module will
 take the place of the default Docker execution module, and backwards-compatible
 naming will be maintained for a couple releases after that to allow users time
 to replace references to ``dockerng`` with ``docker``.
@@ -105,17 +105,18 @@ Both methods can be combined; any registry configured under
 Configuration Options
 ---------------------
 
-The following options can be set in the :ref:`minion config
-<configuration-salt-minion>`:
+The following configuration options can be set to fine-tune how Salt uses
+Docker:
 
 - ``docker.url``: URL to the docker service (default: local socket).
-- ``docker.version``: API version to use (default: currently 1.4 API).
-- ``docker.exec_driver``: Execution driver to use, one of the following:
-    - nsenter
-    - lxc-attach
-    - docker-exec
+- ``docker.version``: API version to use
+- ``docker.exec_driver``: Execution driver to use, one of ``nsenter``,
+  ``lxc-attach``, or ``docker-exec``. See the :ref:`Executing Commands Within a
+  Running Container <docker-execution-driver>` section for more details on how
+  this config parameter is used.
 
-    See :ref:`Executing Commands Within a Running Container <docker-execution-driver>`.
+These configuration options are retrieved using :py:mod:`config.get
+<salt.modules.config.get>` (click the link for further information).
 
 Functions
 ---------
@@ -525,8 +526,12 @@ def __virtual__():
     Only load if docker libs are present
     '''
     if HAS_DOCKER_PY:
-        docker_py_versioninfo = _get_docker_py_versioninfo()
-
+        try:
+            docker_py_versioninfo = _get_docker_py_versioninfo()
+        except Exception:
+            # May fail if we try to connect to a docker daemon but can't
+            return (False, 'Docker module found, but no version could be'
+                    ' extracted')
         # Don't let a failure to interpret the version keep this module from
         # loading. Log a warning (log happens in _get_docker_py_versioninfo()).
         if docker_py_versioninfo is None:
@@ -535,7 +540,7 @@ def __virtual__():
         if docker_py_versioninfo >= MIN_DOCKER_PY:
             try:
                 docker_versioninfo = version().get('VersionInfo')
-            except CommandExecutionError:
+            except Exception:
                 docker_versioninfo = None
 
             if docker_versioninfo is None or docker_versioninfo >= MIN_DOCKER:
@@ -799,6 +804,14 @@ def _get_exec_driver():
         if driver.startswith('lxc-'):
             __context__[contextkey] = 'lxc-attach'
         elif driver.startswith('native-') and HAS_NSENTER:
+            __context__[contextkey] = 'nsenter'
+        elif not driver.strip() and HAS_NSENTER:
+            log.warning(
+                'ExecutionDriver from \'docker info\' is blank, falling '
+                'back to using \'nsenter\'. To squelch this warning, set '
+                'docker.exec_driver. See the Salt documentation for the '
+                'dockerng module for more information.'
+            )
             __context__[contextkey] = 'nsenter'
         else:
             raise NotImplementedError(
@@ -3269,7 +3282,8 @@ def export(name,
         if compression != 'gzip':
             # gzip doesn't use a Compressor object, it uses a .open() method to
             # open the filehandle. If not using gzip, we need to open the
-            # filehandle here.
+            # filehandle here. We make sure to close it in the "finally" block
+            # below.
             out = salt.utils.fopen(path, 'wb')
         response = _client_wrapper('export', name)
         buf = None

@@ -39,6 +39,7 @@ import salt.utils.xdg
 import salt.exceptions
 import salt.utils.sdb
 from salt.utils.locales import sdecode
+import salt.defaults.exitcodes
 
 log = logging.getLogger(__name__)
 
@@ -288,7 +289,7 @@ VALID_OPTS = {
     'log_fmt_console': str,
 
     # The format for a given log file
-    'log_fmt_logfile': tuple,
+    'log_fmt_logfile': (tuple, str),
 
     # A dictionary of logging levels
     'log_granular_levels': dict,
@@ -542,6 +543,7 @@ VALID_OPTS = {
     'syndic_master': (string_types, list),
     'runner_dirs': list,
     'client_acl': dict,
+    'client_acl_verify': bool,
     'client_acl_blacklist': dict,
     'sudo_acl': bool,
     'external_auth': dict,
@@ -703,6 +705,7 @@ VALID_OPTS = {
     'ssh_passwd': str,
     'ssh_port': str,
     'ssh_sudo': bool,
+    'ssh_sudo_user': str,
     'ssh_timeout': float,
     'ssh_user': str,
     'ssh_scan_ports': str,
@@ -1095,6 +1098,7 @@ DEFAULT_MASTER_OPTS = {
     'runner_dirs': [],
     'outputter_dirs': [],
     'client_acl': {},
+    'client_acl_verify': True,
     'client_acl_blacklist': {},
     'sudo_acl': False,
     'external_auth': {},
@@ -1197,6 +1201,7 @@ DEFAULT_MASTER_OPTS = {
     'ssh_passwd': '',
     'ssh_port': '22',
     'ssh_sudo': False,
+    'ssh_sudo_user': '',
     'ssh_timeout': 60,
     'ssh_user': 'root',
     'ssh_scan_ports': '22',
@@ -1260,6 +1265,7 @@ CLOUD_CONFIG_DEFAULTS = {
     'default_include': 'cloud.conf.d/*.conf',
     # Global defaults
     'ssh_auth': '',
+    'cachedir': os.path.join(salt.syspaths.CACHE_DIR, 'cloud'),
     'keysize': 4096,
     'os': '',
     'script': 'bootstrap-salt',
@@ -1366,11 +1372,24 @@ def _validate_opts(opts):
             # passed.
             return valid_type.__name__
         else:
-            if num_types == 1:
-                return valid_type.__name__
-            elif num_types > 1:
-                ret = ', '.join(x.__name__ for x in valid_type[:-1])
-                ret += ' or ' + valid_type[-1].__name__
+            def get_types(types, type_tuple):
+                for item in type_tuple:
+                    if isinstance(item, tuple):
+                        get_types(types, item)
+                    else:
+                        try:
+                            types.append(item.__name__)
+                        except AttributeError:
+                            log.warning(
+                                'Unable to interpret type %s while validating '
+                                'configuration', item
+                            )
+            types = []
+            get_types(types, valid_type)
+
+            ret = ', '.join(types[:-1])
+            ret += ' or ' + types[-1]
+            return ret
 
     errors = []
 
@@ -1411,7 +1430,7 @@ def _validate_opts(opts):
                 err.format(key,
                            val,
                            type(val).__name__,
-                           format_multi_opt(VALID_OPTS[key].__name__))
+                           format_multi_opt(VALID_OPTS[key]))
             )
 
     # RAET on Windows uses 'win32file.CreateMailslot()' for IPC. Due to this,
@@ -1453,18 +1472,18 @@ def _read_conf_file(path):
         try:
             conf_opts = yaml.safe_load(conf_file.read()) or {}
         except yaml.YAMLError as err:
-            log.error(
-                'Error parsing configuration file: {0} - {1}'.format(path, err)
-            )
-            conf_opts = {}
+            message = 'Error parsing configuration file: {0} - {1}'.format(path, err)
+            log.error(message)
+            raise salt.exceptions.SaltConfigurationError(message)
+
         # only interpret documents as a valid conf, not things like strings,
         # which might have been caused by invalid yaml syntax
         if not isinstance(conf_opts, dict):
-            log.error(
-                'Error parsing configuration file: {0} - conf should be a '
-                'document, not {1}.'.format(path, type(conf_opts))
-            )
-            conf_opts = {}
+            message = 'Error parsing configuration file: {0} - conf ' \
+                      'should be a document, not {1}.'.format(path, type(conf_opts))
+            log.error(message)
+            raise salt.exceptions.SaltConfigurationError(message)
+
         # allow using numeric ids: convert int to string
         if 'id' in conf_opts:
             if not isinstance(conf_opts['id'], six.string_types):
@@ -1548,15 +1567,19 @@ def load_config(path, env_var, default_path=None):
                     out.write(ifile.read())
 
     if salt.utils.validate.path.is_readable(path):
-        opts = _read_conf_file(path)
-        opts['conf_file'] = path
-        return opts
+        try:
+            opts = _read_conf_file(path)
+            opts['conf_file'] = path
+            return opts
+        except salt.exceptions.SaltConfigurationError as error:
+            log.error(error)
+            sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
     log.debug('Missing configuration file: {0}'.format(path))
     return {}
 
 
-def include_config(include, orig_path, verbose):
+def include_config(include, orig_path, verbose, exit_on_config_errors=False):
     '''
     Parses extra configuration file(s) specified in an include list in the
     main config file.
@@ -1592,7 +1615,12 @@ def include_config(include, orig_path, verbose):
 
         for fn_ in sorted(glob.glob(path)):
             log.debug('Including configuration from {0!r}'.format(fn_))
-            opts = _read_conf_file(fn_)
+            try:
+                opts = _read_conf_file(fn_)
+            except salt.exceptions.SaltConfigurationError as error:
+                log.error(error)
+                if exit_on_config_errors:
+                    sys.exit(salt.defaults.exitcodes.EX_GENERIC)
 
             include = opts.get('include', [])
             if include:
@@ -1635,7 +1663,8 @@ def insert_system_path(opts, paths):
 def minion_config(path,
                   env_var='SALT_MINION_CONFIG',
                   defaults=None,
-                  cache_minion_id=False):
+                  cache_minion_id=False,
+                  ignore_config_errors=True):
     '''
     Reads in the minion configuration file and sets up special options
 
@@ -1670,8 +1699,10 @@ def minion_config(path,
                                     defaults['default_include'])
     include = overrides.get('include', [])
 
-    overrides.update(include_config(default_include, path, verbose=False))
-    overrides.update(include_config(include, path, verbose=True))
+    overrides.update(include_config(default_include, path, verbose=False,
+                                    exit_on_config_errors=not ignore_config_errors))
+    overrides.update(include_config(include, path, verbose=True,
+                                    exit_on_config_errors=not ignore_config_errors))
 
     opts = apply_minion_config(overrides, defaults, cache_minion_id=cache_minion_id)
     _validate_opts(opts)
@@ -1778,16 +1809,17 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
     '''
     Read in the salt cloud config and return the dict
     '''
-    # Load the cloud configuration
-    overrides = load_config(
-        path,
-        env_var,
-        os.path.join(salt.syspaths.CONFIG_DIR, 'cloud')
-    )
     if path:
         config_dir = os.path.dirname(path)
     else:
         config_dir = salt.syspaths.CONFIG_DIR
+
+    # Load the cloud configuration
+    overrides = load_config(
+        path,
+        env_var,
+        os.path.join(config_dir, 'cloud')
+    )
 
     if defaults is None:
         defaults = CLOUD_CONFIG_DEFAULTS
@@ -1901,6 +1933,9 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
     elif master_config_path is not None and master_config is None:
         master_config = salt.config.master_config(master_config_path)
 
+    # cloud config has a seperate cachedir
+    del master_config['cachedir']
+
     # 2nd - salt-cloud configuration which was loaded before so we could
     # extract the master configuration file if needed.
 
@@ -1982,6 +2017,10 @@ def cloud_config(path, env_var='SALT_CLOUD_CONFIG', defaults=None,
 
     # recurse opts for sdb configs
     apply_sdb(opts)
+
+    # prepend root_dir
+    prepend_root_dirs = ['cachedir']
+    prepend_root_dir(opts, prepend_root_dirs)
 
     # Return the final options
     return opts
@@ -2797,7 +2836,7 @@ def get_id(opts, cache_minion_id=False):
 
     newid = salt.utils.network.generate_minion_id()
     if '__role' in opts and opts.get('__role') == 'minion':
-        log.info('Found minion id from generate_minion_id(): {0}'.format(newid))
+        log.debug('Found minion id from generate_minion_id(): {0}'.format(newid))
     if cache_minion_id and opts.get('minion_id_caching', True):
         _cache_id(newid, id_cache)
     is_ipv4 = newid.count('.') == 3 and not any(c.isalpha() for c in newid)
@@ -2879,7 +2918,7 @@ def apply_minion_config(overrides=None,
     return opts
 
 
-def master_config(path, env_var='SALT_MASTER_CONFIG', defaults=None):
+def master_config(path, env_var='SALT_MASTER_CONFIG', defaults=None, exit_on_config_errors=False):
     '''
     Reads in the master configuration file and sets up default options
 
@@ -2906,8 +2945,8 @@ def master_config(path, env_var='SALT_MASTER_CONFIG', defaults=None):
                                     defaults['default_include'])
     include = overrides.get('include', [])
 
-    overrides.update(include_config(default_include, path, verbose=False))
-    overrides.update(include_config(include, path, verbose=True))
+    overrides.update(include_config(default_include, path, verbose=False), exit_on_config_errors=exit_on_config_errors)
+    overrides.update(include_config(include, path, verbose=True), exit_on_config_errors=exit_on_config_errors)
     opts = apply_master_config(overrides, defaults)
     _validate_opts(opts)
     # If 'nodegroups:' is uncommented in the master config file, and there are

@@ -153,6 +153,17 @@ def is_empty(filename):
         return False
 
 
+def is_hex(value):
+    '''
+    Returns True if value is a hexidecimal string, otherwise returns False
+    '''
+    try:
+        int(value, 16)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def get_color_theme(theme):
     '''
     Return the color theme to use
@@ -602,7 +613,7 @@ def output_profile(pr, stats_path='/tmp/stats', stop=False, id_=None):
             ficn = os.path.join(stats_path, '{0}.{1}.stats'.format(id_, date))
             if not os.path.exists(ficp):
                 pr.dump_stats(ficp)
-                with open(ficn, 'w') as fic:
+                with fopen(ficn, 'w') as fic:
                     pstats.Stats(pr, stream=fic).sort_stats('cumulative')
             log.info('PROFILING: {0} generated'.format(ficp))
             log.info('PROFILING (cumulative): {0} generated'.format(ficn))
@@ -844,18 +855,39 @@ def path_join(*parts):
     # Normalize path converting any os.sep as needed
     parts = [os.path.normpath(p) for p in parts]
 
-    root = parts.pop(0)
+    try:
+        root = parts.pop(0)
+    except IndexError:
+        # No args passed to func
+        return ''
+
     if not parts:
-        return root
+        ret = root
+    else:
+        if is_windows():
+            if len(root) == 1:
+                root += ':'
+            root = root.rstrip(os.sep) + os.sep
 
-    if is_windows():
-        if len(root) == 1:
-            root += ':'
-        root = root.rstrip(os.sep) + os.sep
-
-    return os.path.normpath(os.path.join(
-        root, *[p.lstrip(os.sep) for p in parts]
-    ))
+        stripped = [p.lstrip(os.sep) for p in parts]
+        try:
+            ret = os.path.join(root, *stripped)
+        except UnicodeDecodeError:
+            # This is probably Python 2 and one of the parts contains unicode
+            # characters in a bytestring. First try to decode to the system
+            # encoding.
+            try:
+                enc = __salt_system_encoding__
+            except NameError:
+                enc = sys.stdin.encoding or sys.getdefaultencoding()
+            try:
+                ret = os.path.join(root.decode(enc),
+                                   *[x.decode(enc) for x in stripped])
+            except UnicodeDecodeError:
+                # Last resort, try UTF-8
+                ret = os.path.join(root.decode('UTF-8'),
+                                   *[x.decode('UTF-8') for x in stripped])
+    return os.path.normpath(ret)
 
 
 def pem_finger(path=None, key=None, sum_type='sha256'):
@@ -955,7 +987,7 @@ def format_call(fun,
 
     aspec = salt.utils.args.get_function_argspec(fun)
 
-    arg_data = arg_lookup(fun)
+    arg_data = arg_lookup(fun, aspec)
     args = arg_data['args']
     kwargs = arg_data['kwargs']
 
@@ -1063,13 +1095,14 @@ def format_call(fun,
     return ret
 
 
-def arg_lookup(fun):
+def arg_lookup(fun, aspec=None):
     '''
     Return a dict containing the arguments and default arguments to the
     function.
     '''
     ret = {'kwargs': {}}
-    aspec = salt.utils.args.get_function_argspec(fun)
+    if aspec is None:
+        aspec = salt.utils.args.get_function_argspec(fun)
     if aspec.defaults:
         ret['kwargs'] = dict(zip(aspec.args[::-1], aspec.defaults[::-1]))
     ret['args'] = [arg for arg in aspec.args if arg not in ret['kwargs']]
@@ -2027,11 +2060,7 @@ def alias_function(fun, name, doc=None):
     if doc and isinstance(doc, six.string_types):
         alias_fun.__doc__ = doc
     else:
-        if six.PY3:
-            orig_name = fun.__name__
-        else:
-            orig_name = fun.func_name
-
+        orig_name = fun.__name__
         alias_msg = ('\nThis function is an alias of '
                      '``{0}``.\n'.format(orig_name))
         alias_fun.__doc__ = alias_msg + fun.__doc__
@@ -2272,7 +2301,7 @@ def kwargs_warn_until(kwargs,
         )
 
 
-def version_cmp(pkg1, pkg2):
+def version_cmp(pkg1, pkg2, ignore_epoch=False):
     '''
     Compares two version strings using distutils.version.LooseVersion. This is
     a fallback for providers which don't have a version comparison utility
@@ -2280,6 +2309,10 @@ def version_cmp(pkg1, pkg2):
     version2, and 1 if version1 > version2. Return None if there was a problem
     making the comparison.
     '''
+    normalize = lambda x: str(x).split(':', 1)[-1] if ignore_epoch else str(x)
+    pkg1 = normalize(pkg1)
+    pkg2 = normalize(pkg2)
+
     try:
         # pylint: disable=no-member
         if distutils.version.LooseVersion(pkg1) < \
@@ -2296,22 +2329,25 @@ def version_cmp(pkg1, pkg2):
     return None
 
 
-def compare_versions(ver1='', oper='==', ver2='', cmp_func=None):
+def compare_versions(ver1='',
+                     oper='==',
+                     ver2='',
+                     cmp_func=None,
+                     ignore_epoch=False):
     '''
     Compares two version numbers. Accepts a custom function to perform the
     cmp-style version comparison, otherwise uses version_cmp().
     '''
     cmp_map = {'<': (-1,), '<=': (-1, 0), '==': (0,),
                '>=': (0, 1), '>': (1,)}
-    if oper not in ['!='] and oper not in cmp_map:
-        log.error('Invalid operator "{0}" for version '
-                  'comparison'.format(oper))
+    if oper not in ('!=',) and oper not in cmp_map:
+        log.error('Invalid operator \'%s\' for version comparison', oper)
         return False
 
     if cmp_func is None:
         cmp_func = version_cmp
 
-    cmp_result = cmp_func(ver1, ver2)
+    cmp_result = cmp_func(ver1, ver2, ignore_epoch=ignore_epoch)
     if cmp_result is None:
         return False
 
@@ -2809,7 +2845,7 @@ def to_str(s, encoding=None):
     else:
         if isinstance(s, bytearray):
             return str(s)
-        if isinstance(s, unicode):
+        if isinstance(s, unicode):  # pylint: disable=incompatible-py3-code
             return s.encode(encoding or __salt_system_encoding__)
         raise TypeError('expected str, bytearray, or unicode')
 
@@ -2840,7 +2876,7 @@ def to_unicode(s, encoding=None):
     else:
         if isinstance(s, str):
             return s.decode(encoding or __salt_system_encoding__)
-        return unicode(s)
+        return unicode(s)  # pylint: disable=incompatible-py3-code
 
 
 def is_list(value):

@@ -4,6 +4,7 @@
 from __future__ import absolute_import
 import os
 import hashlib
+import tempfile
 
 # Import Salt Testing libs
 from salttesting.helpers import ensure_in_syspath
@@ -145,9 +146,8 @@ class CPModuleTest(integration.ModuleCase):
 
     def test_get_url(self):
         '''
-        cp.get_url
+        cp.get_url with salt:// source
         '''
-        # We should add a 'if the internet works download some files'
         tgt = os.path.join(integration.TMP, 'scene33')
         self.run_function(
                 'cp.get_url',
@@ -159,6 +159,24 @@ class CPModuleTest(integration.ModuleCase):
             data = scene.read()
             self.assertIn('KNIGHT:  They\'re nervous, sire.', data)
             self.assertNotIn('bacon', data)
+
+    def test_get_url_https(self):
+        '''
+        cp.get_url with https:// source
+        '''
+        tgt = os.path.join(integration.TMP, 'test_get_url_https')
+        self.run_function(
+                'cp.get_url',
+                [
+                    'https://repo.saltstack.com/index.html',
+                    tgt,
+                ])
+        with salt.utils.fopen(tgt, 'r') as instructions:
+            data = instructions.read()
+            self.assertIn('Bootstrap', data)
+            self.assertIn('Debian', data)
+            self.assertIn('Windows', data)
+            self.assertNotIn('AYBABTU', data)
 
     def test_cache_file(self):
         '''
@@ -305,6 +323,22 @@ class CPModuleTest(integration.ModuleCase):
         finally:
             os.unlink(tgt)
 
+    def test_push(self):
+        log_to_xfer = os.path.join(tempfile.gettempdir(), 'salt-runtests.log')
+        try:
+            self.run_function('cp.push', log_to_xfer)
+            tgt_cache_file = os.path.join(
+                 integration.TMP,
+                'master-minion-root',
+                'cache',
+                'minions',
+                'minion',
+                'files',
+                tempfile.gettempdir(),
+                'salt-runtests.log')
+            self.assertTrue(os.path.isfile(tgt_cache_file), 'File was not cached on the master')
+        finally:
+            os.unlink(tgt_cache_file)
 
 if __name__ == '__main__':
     from integration import run_tests

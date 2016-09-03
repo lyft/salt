@@ -173,7 +173,8 @@ def minion_mods(
         __opts__ = salt.config.minion_config('/etc/salt/minion')
         __grains__ = salt.loader.grains(__opts__)
         __opts__['grains'] = __grains__
-        __salt__ = salt.loader.minion_mods(__opts__)
+        __utils__ = salt.loader.utils(__opts__)
+        __salt__ = salt.loader.minion_mods(__opts__, utils=__utils__)
         __salt__['test.ping']()
     '''
     # TODO Publish documentation for module whitelisting
@@ -311,7 +312,8 @@ def pillars(opts, functions, context=None):
                      opts,
                      tag='pillar',
                      pack={'__salt__': functions,
-                           '__context__': context})
+                           '__context__': context,
+                           '__utils__': utils(opts)})
     return FilterDictWrapper(ret, '.ext_pillar')
 
 
@@ -387,7 +389,8 @@ def fileserver(opts, backends):
     return LazyLoader(_module_dirs(opts, 'fileserver', 'fileserver'),
                       opts,
                       tag='fileserver',
-                      whitelist=backends)
+                      whitelist=backends,
+                      pack={'__utils__': utils(opts)})
 
 
 def roster(opts, whitelist=None):
@@ -769,7 +772,8 @@ def clouds(opts):
                                            int_type='clouds'),
                               opts,
                               tag='clouds',
-                              pack={'__active_provider_name__': None},
+                              pack={'__utils__': salt.loader.utils(opts),
+                                    '__active_provider_name__': None},
                               )
     for funcname in LIBCLOUD_FUNCS_NOT_SUPPORTED:
         log.trace(
@@ -1206,7 +1210,7 @@ class LazyLoader(salt.utils.lazy.LazyDict):
                 module_name,
             )
             if virtual_err is not None:
-                log.debug('Error loading {0}.{1}: {2}'.format(self.tag,
+                log.trace('Error loading {0}.{1}: {2}'.format(self.tag,
                                                               module_name,
                                                               virtual_err,
                                                               ))

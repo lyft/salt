@@ -512,6 +512,8 @@ class Compiler(object):
             if not isinstance(chunk['order'], (int, float)):
                 if chunk['order'] == 'last':
                     chunk['order'] = cap + 1000000
+                elif chunk['order'] == 'first':
+                    chunk['order'] = 0
                 else:
                     chunk['order'] = cap
             if 'name_order' in chunk:
@@ -1140,6 +1142,8 @@ class State(object):
             if not isinstance(chunk['order'], (int, float)):
                 if chunk['order'] == 'last':
                     chunk['order'] = cap + 1000000
+                elif chunk['order'] == 'first':
+                    chunk['order'] = 0
                 else:
                     chunk['order'] = cap
             if 'name_order' in chunk:
@@ -2399,14 +2403,16 @@ class BaseHighState(object):
             )
             if contents:
                 found = 1
-            tops[self.opts['environment']] = [
-                compile_template(
-                    contents,
-                    self.state.rend,
-                    self.state.opts['renderer'],
-                    saltenv=self.opts['environment']
-                )
-            ]
+                tops[self.opts['environment']] = [
+                    compile_template(
+                        contents,
+                        self.state.rend,
+                        self.state.opts['renderer'],
+                        saltenv=self.opts['environment']
+                    )
+                ]
+            else:
+                tops[self.opts['environment']] = [{}]
         elif self.opts['top_file_merging_strategy'] == 'merge':
             found = 0
             if self.opts.get('state_top_saltenv', False):
@@ -2417,28 +2423,6 @@ class BaseHighState(object):
                 )
                 if contents:
                     found = found + 1
-                else:
-                    log.debug('No contents loaded for env: {0}'.format(saltenv))
-
-                tops[saltenv].append(
-                    compile_template(
-                        contents,
-                        self.state.rend,
-                        self.state.opts['renderer'],
-                        saltenv=saltenv
-                    )
-                )
-            else:
-                for saltenv in self._get_envs():
-                    contents = self.client.cache_file(
-                        self.opts['state_top'],
-                        saltenv
-                    )
-                    if contents:
-                        found = found + 1
-                    else:
-                        log.debug('No contents loaded for env: {0}'.format(saltenv))
-
                     tops[saltenv].append(
                         compile_template(
                             contents,
@@ -2447,10 +2431,37 @@ class BaseHighState(object):
                             saltenv=saltenv
                         )
                     )
+                else:
+                    tops[saltenv].append({})
+                    log.debug('No contents loaded for env: {0}'.format(saltenv))
+            else:
+                for saltenv in self._get_envs():
+                    contents = self.client.cache_file(
+                        self.opts['state_top'],
+                        saltenv
+                    )
+                    if contents:
+                        found = found + 1
+                        tops[saltenv].append(
+                            compile_template(
+                                contents,
+                                self.state.rend,
+                                self.state.opts['renderer'],
+                                saltenv=saltenv
+                            )
+                        )
+                    else:
+                        tops[saltenv].append({})
+                        log.debug('No contents loaded for env: {0}'.format(saltenv))
             if found > 1:
-                log.warning('Top file merge strategy set to \'merge\' and multiple top files found. '
-                            'Top file merging order is undefined; '
-                            'for better results use \'same\' option')
+                log.warning(
+                    'top_file_merging_strategy is set to \'merge\' and '
+                    'multiple top files were found. Merging order is not '
+                    'deterministic, it may be desirable to either set '
+                    'top_file_merging_strategy to \'same\' or use the '
+                    '\'env_order\' configuration parameter to specify the '
+                    'merging order.'
+                )
 
         if found == 0:
             log.error('No contents found in top file')

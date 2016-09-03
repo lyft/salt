@@ -126,6 +126,12 @@ SUDO=""
 if [ -n "{{SUDO}}" ]
 then SUDO="sudo "
 fi
+SUDO_USER="{{SUDO_USER}}"
+if [ "$SUDO" ] && [ "$SUDO_USER" ]
+then SUDO="sudo -u {{SUDO_USER}}"
+elif [ "$SUDO" ] && [ -n "$SUDO_USER" ]
+then SUDO="sudo "
+fi
 EX_PYTHON_INVALID={EX_THIN_PYTHON_INVALID}
 PYTHON_CMDS="python27 python2.7 python26 python2.6 python2 python"
 for py_cmd in $PYTHON_CMDS
@@ -229,6 +235,10 @@ class SSH(object):
                 'ssh_sudo',
                 salt.config.DEFAULT_MASTER_OPTS['ssh_sudo']
             ),
+            'sudo_user': self.opts.get(
+                'ssh_sudo_user',
+                salt.config.DEFAULT_MASTER_OPTS['ssh_sudo_user']
+            ),
             'identities_only': self.opts.get(
                 'ssh_identities_only',
                 salt.config.DEFAULT_MASTER_OPTS['ssh_identities_only']
@@ -267,7 +277,7 @@ class SSH(object):
         '''
         if not isinstance(ret[host], dict) or self.opts.get('ssh_key_deploy'):
             target = self.targets[host]
-            if 'passwd' in target or self.opts['ssh_passwd']:
+            if target.get('passwd', False) or self.opts['ssh_passwd']:
                 self._key_deploy_run(host, target, False)
             return ret
         if ret[host].get('stderr', '').count('Permission denied'):
@@ -609,6 +619,7 @@ class Single(object):
             mine=False,
             minion_opts=None,
             identities_only=False,
+            sudo_user=None,
             **kwargs):
         # Get mine setting and mine_functions if defined in kwargs (from roster)
         self.mine = mine
@@ -656,7 +667,8 @@ class Single(object):
                 'sudo': sudo,
                 'tty': tty,
                 'mods': self.mods,
-                'identities_only': identities_only}
+                'identities_only': identities_only,
+                'sudo_user': sudo_user}
         self.minion_opts = opts.get('ssh_minion_opts', {})
         if minion_opts is not None:
             self.minion_opts.update(minion_opts)
@@ -664,7 +676,8 @@ class Single(object):
                     'root_dir': os.path.join(self.thin_dir, 'running_data'),
                     'id': self.id,
                     'sock_dir': '/',
-                    'log_file': 'salt-call.log'
+                    'log_file': 'salt-call.log',
+                    'fileserver_list_cache_time': 3,
                 })
         self.minion_config = salt.serializers.yaml.serialize(self.minion_opts)
         self.target = kwargs
@@ -782,6 +795,12 @@ class Single(object):
                 minion_opts=self.minion_opts,
                 **self.target)
             opts_pkg = pre_wrapper['test.opts_pkg']()  # pylint: disable=E1102
+            if '_error' in opts_pkg:
+                #Refresh failed
+                retcode = opts_pkg['retcode']
+                ret = json.dumps({'local': opts_pkg})
+                return ret, retcode
+
             opts_pkg['file_roots'] = self.opts['file_roots']
             opts_pkg['pillar_roots'] = self.opts['pillar_roots']
             opts_pkg['ext_pillar'] = self.opts['ext_pillar']
@@ -796,12 +815,6 @@ class Single(object):
             opts_pkg['id'] = self.id
 
             retcode = 0
-
-            if '_error' in opts_pkg:
-                #Refresh failed
-                retcode = opts_pkg['retcode']
-                ret = json.dumps({'local': opts_pkg['_error']})
-                return ret, retcode
 
             pillar = salt.pillar.Pillar(
                     opts_pkg,
@@ -888,6 +901,7 @@ class Single(object):
         Prepare the command string
         '''
         sudo = 'sudo' if self.target['sudo'] else ''
+        sudo_user = self.target['sudo_user']
         if '_caller_cachedir' in self.opts:
             cachedir = self.opts['_caller_cachedir']
         else:
@@ -926,10 +940,10 @@ ARGS = {10}\n'''.format(self.minion_config,
                          self.argv)
         py_code = SSH_PY_SHIM.replace('#%%OPTS', arg_str)
         py_code_enc = py_code.encode('base64')
-
         cmd = SSH_SH_SHIM.format(
             DEBUG=debug,
             SUDO=sudo,
+            SUDO_USER=sudo_user,
             SSH_PY_CODE=py_code_enc,
             HOST_PY_MAJOR=sys.version_info[0],
         )
@@ -1033,11 +1047,12 @@ ARGS = {10}\n'''.format(self.minion_config,
                     if not self.tty:
                         # If RSTR is not seen in both stdout and stderr then there
                         # was a thin deployment problem.
-                        return 'ERROR: Failure deploying thin: {0}\n{1}'.format(stdout, stderr), stderr, retcode
+                        log.error('ERROR: Failure deploying thin, retrying: {0}\n{1}'.format(stdout, stderr), stderr, retcode)
+                        return self.cmd_block()
                     elif not re.search(RSTR_RE, stdout):
                         # If RSTR is not seen in stdout with tty, then there
                         # was a thin deployment problem.
-                        return 'ERROR: Failure deploying thin: {0}\n{1}'.format(stdout, stderr), stderr, retcode
+                        log.error('ERROR: Failure deploying thin, retrying: {0}\n{1}'.format(stdout, stderr), stderr, retcode)
                 stdout = re.split(RSTR_RE, stdout, 1)[1].strip()
                 if self.tty:
                     stderr = ''

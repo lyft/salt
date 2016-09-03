@@ -22,6 +22,7 @@ class Beacon(object):
     '''
     def __init__(self, opts, functions):
         self.opts = opts
+        self.functions = functions
         self.beacons = salt.loader.beacons(opts, functions)
         self.interval_map = dict()
 
@@ -102,7 +103,13 @@ class Beacon(object):
             if val_config:
                 config = val_config[0][val]
         elif isinstance(config_mod, dict):
-            config = config_mod[mod].get(val, False)
+            try:
+                config = config_mod[mod].get(val, False)
+            except AttributeError:  # The config is a list
+                config = None
+                val_config = [arg for arg in config_mod if val in arg]
+                if val_config:
+                    config = val_config[0][val]
         return config
 
     def _process_interval(self, mod, interval):
@@ -132,6 +139,8 @@ class Beacon(object):
         '''
         # Fire the complete event back along with the list of beacons
         evt = salt.utils.event.get_event('minion', opts=self.opts)
+        b_conf = self.functions['config.merge']('beacons')
+        self.opts['beacons'].update(b_conf)
         evt.fire_event({'complete': True, 'beacons': self.opts['beacons']},
                        tag='/salt/minion/minion_beacons_list_complete')
 

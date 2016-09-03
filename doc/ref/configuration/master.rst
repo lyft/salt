@@ -339,6 +339,21 @@ Default: ``nested``
 
 Set the default outputter used by the salt command.
 
+.. conf_master:: output_file
+
+``output_file``
+---------------
+
+Default: None
+
+Set the default output file used by the salt command. Default is to output
+to the CLI and not to a file. Functions the same way as the "--out-file"
+CLI option, only sets this to a single file for all salt commands.
+
+.. code-block:: yaml
+
+    output_file: /path/output/file
+
 .. conf_master:: color
 
 ``color``
@@ -1204,6 +1219,10 @@ Example:
       - roots
       - git
 
+.. note::
+    For masterless Salt, this parameter must be specified in the minion config
+    file.
+
 .. conf_master:: fileserver_followsymlinks
 
 ``fileserver_followsymlinks``
@@ -1370,6 +1389,10 @@ Example:
       prod:
         - /srv/salt/prod/services
         - /srv/salt/prod/states
+
+.. note::
+    For masterless Salt, this parameter must be specified in the minion config
+    file.
 
 git: Git Remote File Server Backend
 -----------------------------------
@@ -2207,6 +2230,26 @@ configuration is the same as :conf_master:`file_roots`:
         - /srv/pillar/dev
       prod:
         - /srv/pillar/prod
+
+.. conf_master:: pillar_opts
+
+``pillar_opts``
+---------------
+
+Default: ``False``
+
+The ``pillar_opts`` option adds the master configuration file data to a dict in
+the pillar called ``master``. This can be used to set simple configurations in
+the master config file that can then be used on minions.
+
+Note that setting this option to ``True`` means the master config file will be
+included in all minion's pillars. While this makes global configuration of services
+and systems easy, it may not be desired if sensitive data is stored in the master
+configuration.
+
+.. code-block:: yaml
+
+    pillar_opts: False
 
 .. _master-configuration-ext-pillar:
 

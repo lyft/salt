@@ -1491,7 +1491,8 @@ def line(path, content, match=None, mode=None, location=None,
     if before is None and after is None and not match:
         match = content
 
-    body = salt.utils.fopen(path, mode='r').read()
+    with salt.utils.fopen(path, mode='r') as fp_:
+        body = fp_.read()
     body_before = hashlib.sha256(salt.utils.to_bytes(body)).hexdigest()
     after = _regex_to_static(body, after)
     before = _regex_to_static(body, before)
@@ -1632,7 +1633,9 @@ def line(path, content, match=None, mode=None, location=None,
 
     if changed:
         if show_changes:
-            changes_diff = ''.join(difflib.unified_diff(salt.utils.fopen(path, 'r').read().splitlines(), body.splitlines()))
+            with salt.utils.fopen(path, 'r') as fp_:
+                path_content = fp_.read().splitlines()
+            changes_diff = ''.join(difflib.unified_diff(path_content, body.splitlines()))
         fh_ = None
         try:
             fh_ = salt.utils.atomicfile.atomic_open(path, 'w')
@@ -2472,11 +2475,11 @@ def append(path, *args, **kwargs):
             if ofile.read(len(linesep)) != linesep:
                 ofile.seek(0, os.SEEK_END)
                 ofile.write(linesep)
+
     # Append lines in text mode
-    with salt.utils.fopen(path, 'r+') as ofile:
-        ofile.seek(0, os.SEEK_END)
-        for line in args:
-            ofile.write('{0}\n'.format(line))
+    with salt.utils.fopen(path, 'a') as ofile:
+        for new_line in args:
+            ofile.write('{0}{1}'.format(new_line, os.linesep))
 
     return 'Wrote {0} lines to "{1}"'.format(len(args), path)
 
@@ -2821,6 +2824,13 @@ def copy(src, dst, recurse=False, remove_existing=False):
 
     remove_existing will remove all files in the target directory,
     and then copy files from the source.
+
+    .. note::
+        The copy function accepts paths that are local to the Salt minion.
+        This function does not support salt://, http://, or the other
+        additional file paths that are supported by :mod:`states.file.managed
+        <salt.states.file.managed>` and :mod:`states.file.recurse
+        <salt.states.file.recurse>`.
 
     CLI Example:
 

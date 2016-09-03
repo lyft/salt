@@ -9,7 +9,9 @@ from __future__ import absolute_import
 # Import Salt Testing Libs
 from salttesting import TestCase, skipIf
 from salttesting.mock import (
+    Mock,
     MagicMock,
+    call,
     patch,
     NO_MOCK,
     NO_MOCK_REASON
@@ -54,9 +56,25 @@ zypper.rpm = None
 
 @skipIf(NO_MOCK, NO_MOCK_REASON)
 class ZypperTestCase(TestCase):
+
     '''
     Test cases for salt.modules.zypper
     '''
+
+    def setUp(self):
+        self.new_repo_config = dict(
+            name='mock-repo-name',
+            url='http://repo.url/some/path'
+        )
+        side_effect = [
+            Mock(**{'sections.return_value': []}),
+            Mock(**{'sections.return_value': [self.new_repo_config['name']]})
+        ]
+        self.zypper_patcher_config = {
+            '_get_configured_repos': Mock(side_effect=side_effect),
+            '__zypper__': Mock(),
+            'get_repo': Mock(return_value={})
+        }
 
     def test_list_upgrades(self):
         '''
@@ -178,20 +196,22 @@ class ZypperTestCase(TestCase):
                          'sle-manager-tools-beta-broken-eol', 'sle-manager-tools-beta-no-eol'],
                 'vendor': 'SUSE LLC <https://www.suse.com/>',
                 'release': ['0', '0', '0', '0', '0', '0', '0'],
-                'productline': [False, False, False, False, False, False, 'sles'],
+                'productline': [None, None, None, None, None, None, 'sles'],
                 'eol_t': [None, 0, 1509408000, 1522454400, 1522454400, 1730332800, 1730332800],
                 'isbase': [False, False, False, False, False, False, True],
                 'installed': [False, False, False, False, False, False, True],
+                'registerrelease': [None, None, None, None, None, None, '123'],
             },
             'zypper-products-sle11sp3.xml': {
                 'name': ['SUSE-Manager-Server', 'SUSE-Manager-Server', 'SUSE-Manager-Server-Broken-EOL',
                          'SUSE_SLES', 'SUSE_SLES', 'SUSE_SLES', 'SUSE_SLES-SP4-migration'],
                 'vendor': 'SUSE LINUX Products GmbH, Nuernberg, Germany',
                 'release': ['1.138', '1.2', '1.2', '1.2', '1.201', '1.201', '1.4'],
-                'productline': [False, False, False, False, False, 'manager', 'manager'],
+                'productline': [None, None, None, None, None, 'manager', 'manager'],
                 'eol_t': [None, 0, 0, 0, 0, 0, 0],
                 'isbase': [False, False, False, False, False, True, True],
                 'installed': [False, False, False, False, False, True, True],
+                'registerrelease': [None, None, None, None, None, None, "42"],
             }}.items():
 
             ref_out = {
@@ -203,7 +223,7 @@ class ZypperTestCase(TestCase):
                 products = zypper.list_products()
                 self.assertEqual(len(products), 7)
                 self.assertIn(test_data['vendor'], [product['vendor'] for product in products])
-                for kwd in ['name', 'isbase', 'installed', 'release', 'productline', 'eol_t']:
+                for kwd in ['name', 'isbase', 'installed', 'release', 'productline', 'eol_t', 'registerrelease']:
                     self.assertEqual(test_data[kwd], sorted([prod.get(kwd) for prod in products]))
 
     def test_refresh_db(self):
@@ -354,6 +374,31 @@ class ZypperTestCase(TestCase):
                             self.assertTrue(pkgs.get(pkg_name))
                             self.assertEqual(pkgs[pkg_name], pkg_version)
 
+    def test_download(self):
+        '''
+        Test package download
+        :return:
+        '''
+        download_out = {
+            'stdout': get_test_data('zypper-download.xml'),
+            'stderr': None,
+            'retcode': 0
+        }
+
+        test_out = {
+            'nmap': {
+                'path': u'/var/cache/zypp/packages/SLE-12-x86_64-Pool/x86_64/nmap-6.46-1.72.x86_64.rpm',
+                'repository-alias': u'SLE-12-x86_64-Pool',
+                'repository-name': u'SLE-12-x86_64-Pool'
+            }
+        }
+
+        with patch.dict(zypper.__salt__, {'cmd.run_all': MagicMock(return_value=download_out)}):
+            with patch.dict(zypper.__salt__, {'lowpkg.checksum': MagicMock(return_value=True)}):
+                self.assertEqual(zypper.download("nmap"), test_out)
+                test_out['_error'] = "The following package(s) failed to download: foo"
+                self.assertEqual(zypper.download("nmap", "foo"), test_out)
+
     def test_remove_purge(self):
         '''
         Test package removal
@@ -383,15 +428,22 @@ class ZypperTestCase(TestCase):
                 'stderr': ''
         }
 
-        with patch.dict(zypper.__salt__, {'cmd.run_all': MagicMock(return_value=cmd_out)}):
-            with patch.dict(zypper.__salt__, {'pkg_resource.parse_targets': MagicMock(return_value=parsed_targets)}):
-                with patch.dict(zypper.__salt__, {'pkg_resource.stringify': MagicMock()}):
-                    with patch('salt.modules.zypper.list_pkgs', ListPackages()):
-                        diff = zypper.remove(name='vim,pico')
-                        for pkg_name in ['vim', 'pico']:
-                            self.assertTrue(diff.get(pkg_name))
-                            self.assertTrue(diff[pkg_name]['old'])
-                            self.assertFalse(diff[pkg_name]['new'])
+        # If config.get starts being used elsewhere, we'll need to write a
+        # side_effect function.
+        patches = {
+            'cmd.run_all': MagicMock(return_value=cmd_out),
+            'pkg_resource.parse_targets': MagicMock(return_value=parsed_targets),
+            'pkg_resource.stringify': MagicMock(),
+            'config.get': MagicMock(return_value=True)
+        }
+
+        with patch.dict(zypper.__salt__, patches):
+            with patch('salt.modules.zypper.list_pkgs', ListPackages()):
+                diff = zypper.remove(name='vim,pico')
+                for pkg_name in ['vim', 'pico']:
+                    self.assertTrue(diff.get(pkg_name))
+                    self.assertTrue(diff[pkg_name]['old'])
+                    self.assertFalse(diff[pkg_name]['new'])
 
     def test_repo_value_info(self):
         '''
@@ -412,6 +464,192 @@ class ZypperTestCase(TestCase):
             self.assertEqual(r_info['type'], None)
             self.assertEqual(r_info['enabled'], alias == 'SLE12-SP1-x86_64-Update')
             self.assertEqual(r_info['autorefresh'], alias == 'SLE12-SP1-x86_64-Update')
+
+    def test_repo_add_nomod_noref(self):
+        '''
+        Test mod_repo adds the new repo and nothing else
+
+        :return:
+        '''
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        with zypper_patcher:
+            zypper.mod_repo(name, **{'url': url})
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [call('ar', url, name)]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_not_called()
+
+    def test_repo_noadd_nomod_noref(self):
+        '''
+        Test mod_repo detects the repo already exists,
+        no modification was requested and no refresh requested either
+
+        :return:
+        '''
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        self.zypper_patcher_config['_get_configured_repos'] = Mock(
+            **{'return_value.sections.return_value': [name]}
+        )
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        with zypper_patcher:
+            self.assertEqual(zypper.mod_repo(name, **{'url': url}),
+                             {'comment': 'Specified arguments did not result in modification of repo'})
+            zypper.__zypper__.xml.call.assert_not_called()
+            zypper.__zypper__.refreshable.xml.call.assert_not_called()
+
+    def test_repo_add_mod_noref(self):
+        '''
+        Test mod_repo adds the new repo and call modify to update autorefresh
+
+        :return:
+        '''
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        with zypper_patcher:
+            zypper.mod_repo(name, **{'url': url, 'refresh': True})
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [call('ar', url, name)]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_called_once_with(
+                'mr', '--refresh', name
+            )
+
+    def test_repo_noadd_mod_noref(self):
+        '''
+        Test mod_repo detects the repository exists,
+        calls modify to update 'autorefresh' but does not call refresh
+
+        :return:
+        '''
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        self.zypper_patcher_config['_get_configured_repos'] = Mock(
+            **{'return_value.sections.return_value': [name]})
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+        with zypper_patcher:
+            zypper.mod_repo(name, **{'url': url, 'refresh': True})
+            zypper.__zypper__.xml.call.assert_not_called()
+            zypper.__zypper__.refreshable.xml.call.assert_called_once_with(
+                'mr', '--refresh', name
+            )
+
+    def test_repo_add_nomod_ref(self):
+        '''
+        Test mod_repo adds the new repo and refreshes the repo with
+            `zypper --gpg-auto-import-keys refresh <repo-name>`
+
+        :return:
+        '''
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        with zypper_patcher:
+            zypper.mod_repo(name, **{'url': url, 'gpgautoimport': True})
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [
+                    call('ar', url, name),
+                    call('--gpg-auto-import-keys', 'refresh', name)
+                ]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_not_called()
+
+    def test_repo_noadd_nomod_ref(self):
+        '''
+        Test mod_repo detects the repo already exists,
+        has nothing to modify and refreshes the repo with
+            `zypper --gpg-auto-import-keys refresh <repo-name>`
+
+        :return:
+        '''
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        self.zypper_patcher_config['_get_configured_repos'] = Mock(
+            **{'return_value.sections.return_value': [name]}
+        )
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        with zypper_patcher:
+            zypper.mod_repo(name, **{'url': url, 'gpgautoimport': True})
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [call('--gpg-auto-import-keys', 'refresh', name)]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_not_called()
+
+    def test_repo_add_mod_ref(self):
+        '''
+        Test mod_repo adds the new repo,
+        calls modify to update 'autorefresh' and refreshes the repo with
+            `zypper --gpg-auto-import-keys refresh <repo-name>`
+
+        :return:
+        '''
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        with zypper_patcher:
+            zypper.mod_repo(
+                name,
+                **{'url': url, 'refresh': True, 'gpgautoimport': True}
+            )
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [
+                    call('ar', url, name),
+                    call('--gpg-auto-import-keys', 'refresh', name)
+                ]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_called_once_with(
+                '--gpg-auto-import-keys', 'mr', '--refresh', name
+            )
+
+    def test_repo_noadd_mod_ref(self):
+        '''
+        Test mod_repo detects the repo already exists,
+        calls modify to update 'autorefresh' and refreshes the repo with
+            `zypper --gpg-auto-import-keys refresh <repo-name>`
+
+        :return:
+        '''
+        url = self.new_repo_config['url']
+        name = self.new_repo_config['name']
+        self.zypper_patcher_config['_get_configured_repos'] = Mock(
+            **{'return_value.sections.return_value': [name]}
+        )
+        zypper_patcher = patch.multiple(
+            'salt.modules.zypper', **self.zypper_patcher_config)
+
+        with zypper_patcher:
+            zypper.mod_repo(
+                name,
+                **{'url': url, 'refresh': True, 'gpgautoimport': True}
+            )
+            self.assertEqual(
+                zypper.__zypper__.xml.call.call_args_list,
+                [call('--gpg-auto-import-keys', 'refresh', name)]
+            )
+            zypper.__zypper__.refreshable.xml.call.assert_called_once_with(
+                '--gpg-auto-import-keys', 'mr', '--refresh', name
+            )
 
 if __name__ == '__main__':
     from integration import run_tests

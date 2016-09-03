@@ -223,7 +223,8 @@ class MasterKeys(dict):
                 self.sig_path = os.path.join(self.opts['pki_dir'],
                                              opts['master_pubkey_signature'])
                 if os.path.isfile(self.sig_path):
-                    self.pub_signature = salt.utils.fopen(self.sig_path).read()
+                    with salt.utils.fopen(self.sig_path) as fp_:
+                        self.pub_signature = fp_.read()
                     log.info('Read {0}\'s signature from {1}'
                              ''.format(os.path.basename(self.pub_path),
                                        self.opts['master_pubkey_signature']))
@@ -468,10 +469,14 @@ class AsyncAuth(object):
                 error = SaltClientError('Attempt to authenticate with the salt master failed')
             self._authenticate_future.set_exception(error)
         else:
-            AsyncAuth.creds_map[self.__key(self.opts)] = creds
+            key = self.__key(self.opts)
+            AsyncAuth.creds_map[key] = creds
             self._creds = creds
             self._crypticle = Crypticle(self.opts, creds['aes'])
             self._authenticate_future.set_result(True)  # mark the sign-in as complete
+            # Notify the bus about creds change
+            event = salt.utils.event.get_event(self.opts.get('__role'), opts=self.opts, listen=False)
+            event.fire_event({'key': key, 'creds': creds}, salt.utils.event.tagify(prefix='auth', suffix='creds'))
 
     @tornado.gen.coroutine
     def sign_in(self, timeout=60, safe=True, tries=1, channel=None):

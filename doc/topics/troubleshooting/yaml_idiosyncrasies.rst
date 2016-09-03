@@ -112,6 +112,20 @@ versions will also be loaded as booleans (``true``, ``false``, ``yes``, ``no``,
 Pillar data. Make sure that your Pillars which need to use the string versions
 of these values are enclosed in quotes.
 
+The '%' Sign
+============
+
+The `%` symbol has a special meaning in YAML, it needs to be passed as a
+string literal:
+
+.. code-block:: yaml
+
+    cheese:
+      ssh_auth.present:
+        - user: tbortels
+        - source: salt://ssh_keys/chease.pub
+        - config: '%h/.ssh/authorized_keys'
+
 Integers are Parsed as Integers
 ===============================
 
@@ -340,3 +354,13 @@ string with quotes:
     ValueError: month must be in 1..12
     >>> yaml.safe_load('"4017-16-20"')
     '4017-16-20'
+
+
+Keys Limited to 1024 Characters
+===============================
+
+Simple keys are limited to a single line and cannot be longer that 1024 characters.
+This is a limitation from PyYaml, as seen in a comment in `PyYAML's code`_, and
+applies to anything parsed by YAML in Salt.
+
+.. _PyYAML's code: http://pyyaml.org/browser/pyyaml/trunk/lib/yaml/scanner.py#L91

@@ -259,10 +259,15 @@ def present(name,
         This also the location of the home directory to create if createhome is
         set to True.
 
-    createhome
-        If False, the home directory will not be created if it doesn't exist.
-        Please note that directories leading up to the home directory
-        will NOT be created, Default is ``True``.
+    createhome : True
+        If set to ``False``, the home directory will not be created if it
+        doesn't already exist.
+
+        .. warning::
+            Not supported on Windows or Mac OS.
+
+            Additionally, parent directories will *not* be created. The parent
+            directory for ``home`` must already exist.
 
     password
         A password hash to set for the user. This field is only supported on
@@ -449,7 +454,7 @@ def present(name,
             ret['comment'] = ('The following user attributes are set to be '
                               'changed:\n')
             for key, val in six.iteritems(changes):
-                if key == 'password':
+                if key == 'passwd':
                     val = 'XXX-REDACTED-XXX'
                 ret['comment'] += '{0}: {1}\n'.format(key, val)
             return ret

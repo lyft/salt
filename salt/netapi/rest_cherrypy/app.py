@@ -253,7 +253,6 @@ from multiprocessing import Process, Pipe
 # Import third-party libs
 # pylint: disable=import-error
 import cherrypy
-from cherrypy.lib import cpstats
 import yaml
 import salt.ext.six as six
 # pylint: enable=import-error
@@ -1515,7 +1514,7 @@ class Login(LowDataAdapter):
             perms = eauth.get(token['name'], [])
             perms.extend(eauth.get('*', []))
 
-            if 'groups' in token and token['groups'] is not False:
+            if 'groups' in token and token['groups']:
                 user_groups = set(token['groups'])
                 eauth_groups = set([i.rstrip('%') for i in eauth.keys() if i.endswith('%')])
 
@@ -1523,13 +1522,12 @@ class Login(LowDataAdapter):
                     perms.extend(eauth['{0}%'.format(group)])
 
             if not perms:
-                raise ValueError("Eauth permission list not found.")
-        except (AttributeError, IndexError, KeyError, ValueError):
+                logger.debug("Eauth permission list not found.")
+        except Exception:
             logger.debug("Configuration for external_auth malformed for "
                 "eauth '{0}', and user '{1}'."
                 .format(token.get('eauth'), token.get('name')), exc_info=True)
-            raise cherrypy.HTTPError(500,
-                'Configuration for external_auth could not be read.')
+            perms = None
 
         return {'return': [{
             'token': cherrypy.session.id,
@@ -1537,7 +1535,7 @@ class Login(LowDataAdapter):
             'start': token['start'],
             'user': token['name'],
             'eauth': token['eauth'],
-            'perms': perms,
+            'perms': perms or {},
         }]}
 
 
@@ -2252,6 +2250,13 @@ class Stats(object):
             :status 406: |406|
         '''
         if hasattr(logging, 'statistics'):
+            # Late import
+            try:
+                from cherrypy.lib import cpstats
+            except ImportError:
+                logger.error('Import of cherrypy.cpstats failed. Possible '
+                        'upstream bug here: https://github.com/cherrypy/cherrypy/issues/1444')
+                return {}
             return cpstats.extrapolate_statistics(logging.statistics)
 
         return {}

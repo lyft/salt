@@ -84,6 +84,11 @@
 # Set the default outputter used by the salt command. The default is "nested".
 #output: nested
 
+# Set the default output file used by the salt command. Default is to output
+# to the CLI and not to a file. Functions the same way as the "--out-file"
+# CLI option, only sets this to a single file for all salt commands.
+#output_file: None
+
 # Return minions that timeout when running commands like test.ping
 #show_timeout: True
 
@@ -295,6 +300,11 @@
 # This example would blacklist all non sudo users, including root from
 # running any commands. It would also blacklist any use of the "cmd"
 # module. This is completely disabled by default.
+#
+#
+# Check the list of configured users in client ACL against users on the
+# system and throw errors if they do not exist.
+#client_acl_verify: True
 #
 #client_acl_blacklist:
 #  users:

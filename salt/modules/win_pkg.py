@@ -99,9 +99,18 @@ def latest_version(*names, **kwargs):
 
         # get latest installed version of package
         if name in installed_pkgs:
-            log.trace('Sorting out the latest available version of {0}'.format(name))
-            latest_installed = sorted(installed_pkgs[name], cmp=_reverse_cmp_pkg_versions).pop()
-            log.debug('Latest installed version of package {0} is {1}'.format(name, latest_installed))
+            log.trace('Determining latest installed version of %s', name)
+            try:
+                latest_installed = sorted(
+                    installed_pkgs[name], cmp=_reverse_cmp_pkg_versions).pop()
+            except IndexError:
+                log.warning(
+                    '%s was empty in pkg.list_pkgs return data, this is '
+                    'probably a bug in list_pkgs', name
+                )
+            else:
+                log.debug('Latest installed version of %s is %s',
+                          name, latest_installed)
 
         # get latest available (from winrepo_dir) version of package
         pkg_info = _get_package_info(name)
@@ -139,7 +148,7 @@ def upgrade_available(name):
     return latest_version(name) != ''
 
 
-def list_upgrades(refresh=True):
+def list_upgrades(refresh=True, **kwargs):  # pylint: disable=W0613
     '''
     List all available package upgrades on this system
 
@@ -155,7 +164,7 @@ def list_upgrades(refresh=True):
     ret = {}
     for name, data in six.iteritems(get_repo_data().get('repo', {})):
         if version(name):
-            latest = latest_version(name)
+            latest = latest_version(name, refresh=False)
             if latest:
                 ret[name] = latest
     return ret
@@ -239,6 +248,10 @@ def list_pkgs(versions_as_list=False, **kwargs):
     if any([salt.utils.is_true(kwargs.get(x))
             for x in ('removed', 'purge_desired')]):
         return {}
+
+    if kwargs.get('refresh', False):
+        # _get_name_map() needs a refresh_db if cache is not present
+        refresh_db()
 
     ret = {}
     name_map = _get_name_map()
@@ -708,16 +721,23 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
                 cmd.append(cached_pkg)
             cmd.extend(shlex.split(install_flags))
             # Launch the command
-            result = __salt__['cmd.run_stdout'](cmd,
-                                                cache_path,
-                                                output_loglevel='trace',
-                                                python_shell=False)
-            if result:
-                log.error('Failed to install {0}'.format(pkg_name))
-                log.error('error message: {0}'.format(result))
-                ret[pkg_name] = {'failed': result}
-            else:
+            result = __salt__['cmd.run_all'](cmd,
+                                             cache_path,
+                                             output_loglevel='quiet',
+                                             python_shell=False,
+                                             redirect_stderr=True)
+            if not result['retcode']:
+                ret[pkg_name] = {'install status': 'success'}
                 changed.append(pkg_name)
+            elif result['retcode'] == 3010:
+                # 3010 is ERROR_SUCCESS_REBOOT_REQUIRED
+                ret[pkg_name] = {'install status': 'success, reboot required'}
+                changed.append(pkg_name)
+            else:
+                log.error('Failed to install {0}'.format(pkg_name))
+                log.error('retcode {0}'.format(result['retcode']))
+                log.error('installer output: {0}'.format(result['stdout']))
+                ret[pkg_name] = {'install status': 'failed'}
 
     # Get a new list of installed software
     new = list_pkgs()
@@ -746,12 +766,16 @@ def install(name=None, refresh=False, pkgs=None, saltenv='base', **kwargs):
         log.debug("Try {0}".format(tries))
         if tries == 10:
             if not latest:
-                ret['_comment'] = 'Software not found in the registry.\n' \
-                                  'Could be a problem with the Software\n' \
-                                  'definition file. Verify the full_name\n' \
-                                  'and the version match the registry ' \
-                                  'exactly.\n' \
-                                  'Failed after {0} tries.'.format(tries)
+                log.error('Software not found in the registry. Could be '
+                          'a problem with the software definition file. '
+                          'Verify the full_name and the version match the '
+                          'registry exactly. Alternatively, the software may '
+                          'have installed successfully, but is applied to '
+                          'this OS version as a Windows update, which '
+                          '`pkg.install` cannot currently check; if that is '
+                          'the case, this message may be ignored. Stopped '
+                          'checking after {0} tries.'
+                          .format(tries))
 
     # Compare the software list before and after
     # Add the difference to ret
@@ -954,15 +978,18 @@ def remove(name=None, pkgs=None, version=None, **kwargs):
                 cmd.append(expanded_cached_pkg)
             cmd.extend(shlex.split(uninstall_flags))
             # Launch the command
-            result = __salt__['cmd.run_stdout'](cmd,
-                                                output_loglevel='trace',
-                                                python_shell=False)
-            if result:
-                log.error('Failed to install {0}'.format(target))
-                log.error('error message: {0}'.format(result))
-                ret[target] = {'failed': result}
-            else:
+            result = __salt__['cmd.run_all'](cmd,
+                                             output_loglevel='trace',
+                                             python_shell=False,
+                                             redirect_stderr=True)
+            if not result['retcode']:
+                ret[target] = {'uninstall status': 'success'}
                 changed.append(target)
+            else:
+                log.error('Failed to remove {0}'.format(target))
+                log.error('retcode {0}'.format(result['retcode']))
+                log.error('uninstaller output: {0}'.format(result['stdout']))
+                ret[target] = {'uninstall status': 'failed'}
 
     # Get a new list of installed software
     new = list_pkgs()
@@ -1091,7 +1118,10 @@ def _reverse_cmp_pkg_versions(pkg1, pkg2):
 def _get_latest_pkg_version(pkginfo):
     if len(pkginfo) == 1:
         return next(six.iterkeys(pkginfo))
-    return sorted(pkginfo, cmp=_reverse_cmp_pkg_versions).pop()
+    try:
+        return sorted(pkginfo, cmp=_reverse_cmp_pkg_versions).pop()
+    except IndexError:
+        return ''
 
 
 def compare_versions(ver1='', oper='==', ver2=''):

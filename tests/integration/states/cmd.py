@@ -51,7 +51,8 @@ class CMDTest(integration.ModuleCase,
         date_file = tempfile.mkstemp()[1]
         state_key = 'cmd_|-date > {0}_|-date > {0}_|-run'.format(date_file)
         try:
-            salt.utils.fopen(state_file, 'w').write(textwrap.dedent('''\
+            with salt.utils.fopen(state_file, 'w') as fp_:
+                fp_.write(textwrap.dedent('''\
                 date > {0}:
                   cmd.run
                 '''.format(date_file)))
@@ -73,7 +74,8 @@ class CMDTest(integration.ModuleCase,
         unless_file = tempfile.mkstemp()[1]
         state_key = 'cmd_|-/var/log/messages_|-/var/log/messages_|-run'
         try:
-            salt.utils.fopen(state_file, 'w').write(textwrap.dedent('''\
+            with salt.utils.fopen(state_file, 'w') as fp_:
+                fp_.write(textwrap.dedent('''\
                 /var/log/messages:
                   cmd.run:
                     - unless: echo cheese > {0}
@@ -84,6 +86,22 @@ class CMDTest(integration.ModuleCase,
         finally:
             os.remove(state_file)
             os.remove(unless_file)
+
+    def test_run_unless_multiple_cmds(self):
+        '''
+        test cmd.run using multiple unless options where the first cmd in the
+        list will pass, but the second will fail. This tests the fix for issue
+        #35384. (The fix is in PR #35545.)
+        '''
+        sls = self.run_function('state.sls', mods='issue-35384')
+        self.assertSaltTrueReturn(sls)
+        # We must assert against the comment here to make sure the comment reads that the
+        # command "echo "hello"" was run. This ensures that we made it to the last unless
+        # command in the state. If the comment reads "unless execution succeeded", or similar,
+        # then the unless state run bailed out after the first unless command succeeded,
+        # which is the bug we're regression testing for.
+        self.assertEqual(sls['cmd_|-cmd_run_unless_multiple_|-echo "hello"_|-run']['comment'],
+                         'Command "echo "hello"" run')
 
     def test_run_creates_exists(self):
         '''
@@ -96,7 +114,8 @@ class CMDTest(integration.ModuleCase,
         creates_file = tempfile.mkstemp()[1]
         state_key = 'cmd_|-touch {0}_|-touch {0}_|-run'.format(creates_file)
         try:
-            salt.utils.fopen(state_file, 'w').write(textwrap.dedent('''\
+            with salt.utils.fopen(state_file, 'w') as fp_:
+                fp_.write(textwrap.dedent('''\
                 touch {0}:
                   cmd.run:
                     - creates: {0}
@@ -121,7 +140,8 @@ class CMDTest(integration.ModuleCase,
         os.remove(creates_file)
         state_key = 'cmd_|-touch {0}_|-touch {0}_|-run'.format(creates_file)
         try:
-            salt.utils.fopen(state_file, 'w').write(textwrap.dedent('''\
+            with salt.utils.fopen(state_file, 'w') as fp_:
+                fp_.write(textwrap.dedent('''\
                 touch {0}:
                   cmd.run:
                     - creates: {0}
@@ -146,7 +166,8 @@ class CMDTest(integration.ModuleCase,
         biscuits_key = 'cmd_|-biscuits_|-echo hello_|-wait'
 
         try:
-            salt.utils.fopen(state_file, 'w').write(textwrap.dedent('''\
+            with salt.utils.fopen(state_file, 'w') as fp_:
+                fp_.write(textwrap.dedent('''\
                 saltines:
                   cmd.run:
                     - name: /bin/true
