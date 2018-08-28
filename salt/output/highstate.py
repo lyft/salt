@@ -135,6 +135,8 @@ def _format_host(host, data):
 
             tcolor = colors['GREEN']
             schanged, ctext = _format_changes(ret['changes'])
+            if not ctext and 'pchanges' in ret:
+                schanged, ctext = _format_changes(ret['pchanges'])
             nchanges += 1 if schanged else 0
 
             # Skip this state if it was successful & diff output was requested
