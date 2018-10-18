@@ -48,7 +48,7 @@ def get_latest_snapshot(artifactory_url, repository, group_id, artifact_id, pack
                     artifactory_url, repository, group_id, artifact_id, packaging, target_dir, classifier)
 
     headers = {}
-    if username and password:
+    if username is not None and password is not None:
         headers['Authorization'] = 'Basic {0}'.format(base64.encodestring('{0}:{1}'.format(username, password)).replace('\n', ''))
     artifact_metadata = _get_artifact_metadata(artifactory_url=artifactory_url, repository=repository, group_id=group_id, artifact_id=artifact_id, headers=headers)
     version = artifact_metadata['latest_version']
@@ -88,7 +88,7 @@ def get_snapshot(artifactory_url, repository, group_id, artifact_id, packaging, 
     log.debug('======================== MODULE FUNCTION: artifactory.get_snapshot(artifactory_url=%s, repository=%s, group_id=%s, artifact_id=%s, packaging=%s, version=%s, target_dir=%s, classifier=%s)',
               artifactory_url, repository, group_id, artifact_id, packaging, version, target_dir, classifier)
     headers = {}
-    if username and password:
+    if username is not None and password is not None:
         headers['Authorization'] = 'Basic {0}'.format(base64.encodestring('{0}:{1}'.format(username, password)).replace('\n', ''))
     snapshot_url, file_name = _get_snapshot_url(artifactory_url=artifactory_url, repository=repository, group_id=group_id, artifact_id=artifact_id, version=version, packaging=packaging, snapshot_version=snapshot_version, classifier=classifier, headers=headers)
     target_file = __resolve_target_file(file_name, target_dir, target_file)
@@ -126,7 +126,7 @@ def get_release(artifactory_url, repository, group_id, artifact_id, packaging, v
     log.debug('======================== MODULE FUNCTION: artifactory.get_release(artifactory_url=%s, repository=%s, group_id=%s, artifact_id=%s, packaging=%s, version=%s, target_dir=%s, classifier=%s)',
               artifactory_url, repository, group_id, artifact_id, packaging, version, target_dir, classifier)
     headers = {}
-    if username and password:
+    if username is not None and password is not None:
         headers['Authorization'] = 'Basic {0}'.format(base64.encodestring('{0}:{1}'.format(username, password)).replace('\n', ''))
     release_url, file_name = _get_release_url(repository, group_id, artifact_id, packaging, version, artifactory_url, classifier)
     target_file = __resolve_target_file(file_name, target_dir, target_file)
