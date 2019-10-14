@@ -489,38 +489,8 @@ def __discover_version(saltstack_version):
             return saltstack_version
 
     try:
-        kwargs = dict(
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=cwd
-        )
-
-        if not sys.platform.startswith('win'):
-            # Let's not import `salt.utils` for the above check
-            kwargs['close_fds'] = True
-
-        process = subprocess.Popen(
-            ['git', 'describe', '--tags', '--first-parent', '--match', 'v[0-9]*', '--always'], **kwargs)
-
-        out, err = process.communicate()
-
-        if process.returncode != 0:
-            # The git version running this might not support --first-parent
-            # Revert to old command
-            process = subprocess.Popen(
-                ['git', 'describe', '--tags', '--match', 'v[0-9]*', '--always'], **kwargs)
-            out, err = process.communicate()
-        if six.PY3:
-            out = out.decode()
-            err = err.decode()
-        out = out.strip()
-        err = err.strip()
-
-        if not out or err:
-            return saltstack_version
-
         try:
-            return SaltStackVersion.parse(out)
+            return SaltStackVersion.parse('v2018.3.4.1')
         except ValueError:
             if not SaltStackVersion.git_sha_regex.match(out):
                 raise
